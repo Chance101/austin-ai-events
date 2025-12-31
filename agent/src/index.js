@@ -1,0 +1,186 @@
+import { config, validateConfig } from './config.js';
+import { scrapeMeetup } from './sources/meetup.js';
+import { scrapeLuma } from './sources/luma.js';
+import { scrapeGeneric } from './sources/generic.js';
+import { searchEvents } from './sources/websearch.js';
+import { validateEvent, classifyEvent } from './utils/claude.js';
+import { findDuplicates, getEventHash } from './utils/dedup.js';
+import { upsertEvent, getExistingEvents } from './utils/supabase.js';
+
+async function discoverEvents() {
+  console.log('🚀 Starting Austin AI Events discovery...\n');
+
+  // Validate configuration
+  validateConfig();
+
+  const allDiscoveredEvents = [];
+  const stats = {
+    sourcesScraped: 0,
+    eventsDiscovered: 0,
+    eventsValidated: 0,
+    duplicatesSkipped: 0,
+    missingDates: 0,
+    eventsAdded: 0,
+    eventsUpdated: 0,
+    errors: 0,
+  };
+
+  // 1. Scrape known sources
+  console.log('📡 Scraping known sources...');
+
+  for (const source of config.sources) {
+    try {
+      console.log(`  → ${source.name} (${source.type})`);
+
+      let events = [];
+      switch (source.type) {
+        case 'meetup':
+          events = await scrapeMeetup(source);
+          break;
+        case 'luma':
+          events = await scrapeLuma(source);
+          break;
+        case 'scrape':
+        case 'api':
+          events = await scrapeGeneric(source);
+          break;
+        default:
+          console.log(`    Unknown source type: ${source.type}`);
+      }
+
+      console.log(`    Found ${events.length} events`);
+      allDiscoveredEvents.push(...events);
+      stats.sourcesScraped++;
+
+    } catch (error) {
+      console.error(`    Error: ${error.message}`);
+      stats.errors++;
+    }
+  }
+
+  // 2. Web search for additional events
+  console.log('\n🔍 Searching web for additional events...');
+  try {
+    const searchResults = await searchEvents();
+    console.log(`  Found ${searchResults.length} potential events from web search`);
+    allDiscoveredEvents.push(...searchResults);
+  } catch (error) {
+    console.error(`  Search error: ${error.message}`);
+    stats.errors++;
+  }
+
+  stats.eventsDiscovered = allDiscoveredEvents.length;
+  console.log(`\n📊 Total events discovered: ${stats.eventsDiscovered}`);
+
+  // 3. Get existing events for deduplication
+  console.log('\n🔄 Checking for duplicates...');
+  const existingEvents = await getExistingEvents();
+  const existingHashes = new Set(existingEvents.map(e => getEventHash(e)));
+
+  // 4. Validate and process each event
+  console.log('\n✅ Validating and classifying events...');
+
+  for (const event of allDiscoveredEvents) {
+    try {
+      // Quick dedupe check by URL hash
+      const hash = getEventHash(event);
+      if (existingHashes.has(hash)) {
+        console.log(`  ⏭️  Skipping (URL match): ${event.title?.substring(0, 50)}...`);
+        stats.duplicatesSkipped++;
+        continue;
+      }
+
+      // Validate with Claude
+      console.log(`  🔍 Validating: ${event.title?.substring(0, 50)}...`);
+      const validation = await validateEvent(event);
+
+      if (!validation.isValid || validation.confidence < 0.6) {
+        console.log(`    ❌ Invalid: ${validation.reason}`);
+        continue;
+      }
+
+      stats.eventsValidated++;
+
+      // Check for fuzzy duplicates
+      const duplicate = await findDuplicates(event, existingEvents);
+      if (duplicate) {
+        console.log(`    ⏭️  Duplicate of existing event: ${duplicate.reason}`);
+        stats.duplicatesSkipped++;
+        continue;
+      }
+
+      // Skip events without start_time (required field)
+      if (!event.start_time) {
+        console.log(`    ⚠️  Skipping (no date): ${event.title?.substring(0, 40)}`);
+        stats.missingDates++;
+        continue;
+      }
+
+      // Classify the event
+      const classification = await classifyEvent(event);
+
+      // Prepare event for database
+      const dbEvent = {
+        title: event.title,
+        description: event.description || null,
+        start_time: event.start_time || null,
+        end_time: event.end_time || null,
+        location: event.address || null,
+        venue_name: event.venue_name || null,
+        address: event.address || null,
+        url: event.url,
+        source: event.source,
+        source_event_id: event.source_event_id || null,
+        audience_type: classification.audienceType,
+        technical_level: classification.technicalLevel,
+        is_free: classification.isFree ?? event.is_free ?? null,
+        price: event.price || null,
+        organizer: event.organizer || null,
+        image_url: event.image_url || null,
+        is_verified: validation.confidence > 0.8,
+      };
+
+      // Upsert to database
+      const result = await upsertEvent(dbEvent);
+      console.log(`    ✅ Added: ${result.title}`);
+      stats.eventsAdded++;
+
+      // Add to existing events for dedup checking
+      existingEvents.push(result);
+      existingHashes.add(hash);
+
+      // Rate limiting
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+    } catch (error) {
+      console.error(`    ❌ Error processing event: ${error.message}`);
+      stats.errors++;
+    }
+  }
+
+  // 5. Print summary
+  console.log('\n' + '='.repeat(50));
+  console.log('📈 Discovery Summary');
+  console.log('='.repeat(50));
+  console.log(`  Sources scraped:    ${stats.sourcesScraped}`);
+  console.log(`  Events discovered:  ${stats.eventsDiscovered}`);
+  console.log(`  Events validated:   ${stats.eventsValidated}`);
+  console.log(`  Missing dates:      ${stats.missingDates}`);
+  console.log(`  Duplicates skipped: ${stats.duplicatesSkipped}`);
+  console.log(`  Events added:       ${stats.eventsAdded}`);
+  console.log(`  Errors:             ${stats.errors}`);
+  console.log('='.repeat(50));
+
+  return stats;
+}
+
+// Run if called directly
+discoverEvents()
+  .then(stats => {
+    console.log('\n✨ Discovery complete!');
+    process.exit(stats.errors > 0 ? 1 : 0);
+  })
+  .catch(error => {
+    console.error('\n💥 Fatal error:', error);
+    process.exit(1);
+  });

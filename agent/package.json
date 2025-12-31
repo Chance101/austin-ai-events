@@ -1,0 +1,35 @@
+{
+  "name": "austin-ai-events-agent",
+  "version": "1.0.0",
+  "description": "Automated AI event discovery agent for Austin, TX",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "discover": "node src/index.js",
+    "test": "node --test src/**/*.test.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.52.0",
+    "@supabase/supabase-js": "^2.47.0",
+    "cheerio": "^1.0.0",
+    "date-fns": "^4.1.0",
+    "fuse.js": "^7.0.0",
+    "node-fetch": "^3.3.2",
+    "serpapi": "^2.1.0"
+  },
+  "devDependencies": {
+    "dotenv": "^16.4.7"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "keywords": [
+    "ai",
+    "events",
+    "austin",
+    "calendar",
+    "automation"
+  ],
+  "license": "MIT"
+}
