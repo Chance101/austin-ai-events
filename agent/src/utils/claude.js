@@ -3,7 +3,7 @@ import { config } from '../config.js';
 
 let client = null;
 
-function getClient() {
+export function getClient() {
   if (!client) {
     client = new Anthropic({ apiKey: config.anthropicApiKey });
   }

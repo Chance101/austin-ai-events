@@ -10,6 +10,22 @@ import { scrapeLeadersInAI } from './sources/leadersinai.js';
 import { validateEvent, classifyEvent } from './utils/claude.js';
 import { findDuplicates, getEventHash } from './utils/dedup.js';
 import { upsertEvent, getExistingEvents } from './utils/supabase.js';
+import { discoverSources, getTrustedSources, updateSourceStats } from './discovery/sourceDiscovery.js';
+
+/**
+ * Map database source_type to scraper type
+ */
+function mapSourceType(dbType) {
+  const typeMap = {
+    'meetup': 'meetup',
+    'luma': 'luma',
+    'eventbrite': 'scrape',
+    'website': 'scrape',
+    'university': 'scrape',
+    'other': 'scrape',
+  };
+  return typeMap[dbType] || 'scrape';
+}
 
 async function discoverEvents() {
   console.log('🚀 Starting Austin AI Events discovery...\n');
@@ -27,12 +43,63 @@ async function discoverEvents() {
     eventsAdded: 0,
     eventsUpdated: 0,
     errors: 0,
+    // Discovery stats
+    newSourcesDiscovered: 0,
+    queriesRun: 0,
+    newQueriesAdded: 0,
   };
 
-  // 1. Scrape known sources
-  console.log('📡 Scraping known sources...');
+  // 0. Run source discovery first (find new sources via search)
+  console.log('=' .repeat(50));
+  console.log('PHASE 1: SOURCE DISCOVERY');
+  console.log('=' .repeat(50) + '\n');
 
-  for (const source of config.sources) {
+  try {
+    const discoveryStats = await discoverSources();
+    stats.newSourcesDiscovered = discoveryStats.sourcesDiscovered;
+    stats.queriesRun = discoveryStats.queriesRun;
+    stats.newQueriesAdded = discoveryStats.newQueriesAdded;
+  } catch (error) {
+    console.error('Source discovery error:', error.message);
+    stats.errors++;
+  }
+
+  // 1. Get all sources to scrape (config + trusted DB sources)
+  console.log('=' .repeat(50));
+  console.log('PHASE 2: EVENT SCRAPING');
+  console.log('=' .repeat(50) + '\n');
+
+  console.log('📡 Gathering sources...');
+
+  // Start with config sources
+  const allSources = [...config.sources];
+  const configUrls = new Set(config.sources.map(s => s.url));
+
+  // Add trusted DB sources not in config
+  try {
+    const dbSources = await getTrustedSources();
+    for (const dbSource of dbSources) {
+      if (!configUrls.has(dbSource.url)) {
+        // Map DB source to scraper config format
+        // Use 'web-search' as the source enum for dynamically discovered sources
+        allSources.push({
+          id: 'web-search',  // Use valid enum value, not UUID
+          name: dbSource.name,
+          url: dbSource.url,
+          type: mapSourceType(dbSource.source_type),
+          fromDb: true,
+        });
+      }
+    }
+    console.log(`  Config sources: ${config.sources.length}, DB sources: ${dbSources.length}`);
+    console.log(`  Total unique sources: ${allSources.length}\n`);
+  } catch (error) {
+    console.error('Error fetching DB sources:', error.message);
+  }
+
+  console.log('📡 Scraping sources...');
+
+  for (const source of allSources) {
     try {
       console.log(`  → ${source.name} (${source.type})`);
 
@@ -68,6 +135,11 @@ async function discoverEvents() {
       allDiscoveredEvents.push(...events);
       stats.sourcesScraped++;
 
+      // Update source stats in DB
+      if (source.fromDb || source.url) {
+        await updateSourceStats(source.url, events.length).catch(() => {});
+      }
+
     } catch (error) {
       console.error(`    Error: ${error.message}`);
       stats.errors++;
@@ -98,6 +170,11 @@ async function discoverEvents() {
 
   for (const event of allDiscoveredEvents) {
     try {
+      // Skip events without title or URL
+      if (!event.title || !event.url) {
+        continue;
+      }
+
       // Quick dedupe check by URL hash
       const hash = getEventHash(event);
       if (existingHashes.has(hash)) {
@@ -176,15 +253,20 @@ async function discoverEvents() {
 
   // 5. Print summary
   console.log('\n' + '='.repeat(50));
-  console.log('📈 Discovery Summary');
+  console.log('📈 FINAL SUMMARY');
   console.log('='.repeat(50));
-  console.log(`  Sources scraped:    ${stats.sourcesScraped}`);
-  console.log(`  Events discovered:  ${stats.eventsDiscovered}`);
-  console.log(`  Events validated:   ${stats.eventsValidated}`);
-  console.log(`  Missing dates:      ${stats.missingDates}`);
-  console.log(`  Duplicates skipped: ${stats.duplicatesSkipped}`);
-  console.log(`  Events added:       ${stats.eventsAdded}`);
-  console.log(`  Errors:             ${stats.errors}`);
+  console.log('\n  Source Discovery:');
+  console.log(`    Queries run:          ${stats.queriesRun}`);
+  console.log(`    New sources found:    ${stats.newSourcesDiscovered}`);
+  console.log(`    New queries added:    ${stats.newQueriesAdded}`);
+  console.log('\n  Event Scraping:');
+  console.log(`    Sources scraped:      ${stats.sourcesScraped}`);
+  console.log(`    Events discovered:    ${stats.eventsDiscovered}`);
+  console.log(`    Events validated:     ${stats.eventsValidated}`);
+  console.log(`    Missing dates:        ${stats.missingDates}`);
+  console.log(`    Duplicates skipped:   ${stats.duplicatesSkipped}`);
+  console.log(`    Events added:         ${stats.eventsAdded}`);
+  console.log(`    Errors:               ${stats.errors}`);
   console.log('='.repeat(50));
 
   return stats;
