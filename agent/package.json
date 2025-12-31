@@ -7,7 +7,6 @@
   "scripts": {
     "start": "node src/index.js",
     "discover": "node src/index.js",
-    "resummarize": "node src/resummarize.js",
     "test": "node --test src/**/*.test.js"
   },
   "dependencies": {
