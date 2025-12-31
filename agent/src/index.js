@@ -213,9 +213,10 @@ async function discoverEvents() {
       const classification = await classifyEvent(event);
 
       // Prepare event for database
+      // Use AI-generated summary if available, otherwise fall back to original description
       const dbEvent = {
         title: event.title,
-        description: event.description || null,
+        description: classification.summary || event.description || null,
         start_time: event.start_time || null,
         end_time: event.end_time || null,
         location: event.address || null,

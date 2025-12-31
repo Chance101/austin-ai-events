@@ -119,7 +119,7 @@ export default function EventCard({ event }: EventCardProps) {
         )}
 
         <div className="mt-4 flex flex-wrap gap-2">
-          <span className={`px-2 py-1 text-xs font-medium rounded ${levelColors[event.technical_level] || levelColors['all-levels']}`}>
+          <span className={`px-2 py-1 text-xs font-medium rounded capitalize ${levelColors[event.technical_level] || levelColors['all-levels']}`}>
             {event.technical_level.replace('-', ' ')}
           </span>
 
@@ -132,9 +132,14 @@ export default function EventCard({ event }: EventCardProps) {
             </span>
           ))}
 
-          {event.is_free && (
+          {event.is_free === true && (
             <span className="px-2 py-1 text-xs font-medium rounded bg-emerald-100 text-emerald-800">
               Free
+            </span>
+          )}
+          {event.is_free === false && (
+            <span className="px-2 py-1 text-xs font-medium rounded bg-amber-100 text-amber-800">
+              Paid
             </span>
           )}
         </div>

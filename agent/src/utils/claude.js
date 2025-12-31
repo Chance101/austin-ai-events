@@ -66,7 +66,7 @@ Consider:
 export async function classifyEvent(eventData) {
   const anthropic = getClient();
 
-  const prompt = `Classify this AI/ML event by audience and technical level.
+  const prompt = `Classify this AI/ML event and create a clean summary.
 
 Event:
 Title: ${eventData.title}
@@ -78,15 +78,23 @@ Respond with a JSON object:
   "audienceType": string[],     // array from: "developers", "business", "researchers", "general", "students"
   "technicalLevel": string,     // one of: "beginner", "intermediate", "advanced", "all-levels"
   "isFree": boolean | null,     // true, false, or null if unknown
-  "reasoning": string           // brief explanation
+  "summary": string,            // 1-2 sentence clean summary of what the event is about (no URLs, no markdown, no registration info)
+  "reasoning": string           // brief explanation of classification
 }
 
-Guidelines:
+Guidelines for classification:
 - Most meetups are "all-levels" unless specifically advanced
 - Hackathons are typically "developers" + "intermediate" or "advanced"
 - Networking events are often "general" or "business"
 - Academic talks are "researchers" + "advanced"
-- Workshops can vary - look for skill level indicators`;
+- Workshops can vary - look for skill level indicators
+
+Guidelines for summary:
+- Write 1-2 clear sentences about what attendees will learn or experience
+- Focus on the topic/content, not logistics like registration links or seat limits
+- Remove any markdown formatting, URLs, or promotional language
+- If it's a technical talk, mention the key topics covered
+- Make it readable and informative for someone scanning event listings`;
 
   const message = await anthropic.messages.create({
     model: config.claudeModel,
@@ -110,6 +118,7 @@ Guidelines:
     audienceType: ['general'],
     technicalLevel: 'all-levels',
     isFree: null,
+    summary: null,
     reasoning: 'Default classification due to parsing error',
   };
 }
