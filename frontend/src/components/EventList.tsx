@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { addDays } from 'date-fns';
 import { supabase } from '@/lib/supabase';
 import { Event, EventFilters as Filters } from '@/types/event';
 import EventCard from './EventCard';
@@ -11,10 +12,11 @@ export default function EventList() {
   const [filters, setFilters] = useState<Filters>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
     fetchEvents();
-  }, [filters]);
+  }, [filters, showAll]);
 
   const fetchEvents = async () => {
     setLoading(true);
@@ -27,11 +29,19 @@ export default function EventList() {
     }
 
     try {
+      const now = new Date();
+      const thirtyDaysFromNow = addDays(now, 30);
+
       let query = supabase
         .from('events')
         .select('*')
-        .gte('start_time', new Date().toISOString())
+        .gte('start_time', now.toISOString())
         .order('start_time', { ascending: true });
+
+      // Only filter to 30 days if not showing all
+      if (!showAll) {
+        query = query.lte('start_time', thirtyDaysFromNow.toISOString());
+      }
 
       if (filters.audience && filters.audience.length > 0) {
         query = query.overlaps('audience_type', filters.audience);
@@ -86,12 +96,33 @@ export default function EventList() {
           <div className="space-y-4">
             <p className="text-sm text-gray-600">
               {events.length} upcoming event{events.length !== 1 ? 's' : ''}
+              {!showAll && ' in the next 30 days'}
             </p>
             <div className="grid gap-4 sm:grid-cols-1 lg:grid-cols-2">
               {events.map((event) => (
                 <EventCard key={event.id} event={event} />
               ))}
             </div>
+            {!showAll && (
+              <div className="text-center pt-4">
+                <button
+                  onClick={() => setShowAll(true)}
+                  className="px-6 py-2 text-sm font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
+                >
+                  Show all upcoming events
+                </button>
+              </div>
+            )}
+            {showAll && (
+              <div className="text-center pt-4">
+                <button
+                  onClick={() => setShowAll(false)}
+                  className="px-6 py-2 text-sm font-medium text-gray-600 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors"
+                >
+                  Show next 30 days only
+                </button>
+              </div>
+            )}
           </div>
         )}
       </main>
