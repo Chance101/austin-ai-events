@@ -19,6 +19,10 @@ export type EventSource =
   | 'ai-automation'
   | 'capital-factory'
   | 'ut-austin'
+  | 'austin-forum'
+  | 'ai-accelerator'
+  | 'austin-ai'
+  | 'leaders-in-ai'
   | 'web-search'
   | 'manual';
 

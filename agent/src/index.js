@@ -3,6 +3,10 @@ import { scrapeMeetup } from './sources/meetup.js';
 import { scrapeLuma } from './sources/luma.js';
 import { scrapeGeneric } from './sources/generic.js';
 import { searchEvents } from './sources/websearch.js';
+import { scrapeAustinForum } from './sources/austinforum.js';
+import { scrapeAIAccelerator } from './sources/aiaccelerator.js';
+import { scrapeAustinAI } from './sources/austinai.js';
+import { scrapeLeadersInAI } from './sources/leadersinai.js';
 import { validateEvent, classifyEvent } from './utils/claude.js';
 import { findDuplicates, getEventHash } from './utils/dedup.js';
 import { upsertEvent, getExistingEvents } from './utils/supabase.js';
@@ -39,6 +43,18 @@ async function discoverEvents() {
           break;
         case 'luma':
           events = await scrapeLuma(source);
+          break;
+        case 'austinforum':
+          events = await scrapeAustinForum(source);
+          break;
+        case 'aiaccelerator':
+          events = await scrapeAIAccelerator(source);
+          break;
+        case 'austinai':
+          events = await scrapeAustinAI(source);
+          break;
+        case 'leadersinai':
+          events = await scrapeLeadersInAI(source);
           break;
         case 'scrape':
         case 'api':
