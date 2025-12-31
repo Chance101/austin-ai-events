@@ -37,13 +37,17 @@ export async function findDuplicates(newEvent, existingEvents) {
     const existingVenue = normalizeVenue(existing.venue_name);
     const existingDate = existing.start_time ? parseISO(existing.start_time) : null;
 
-    // If titles match exactly (normalized) and same day, it's a duplicate
-    if (newTitle === existingTitle && newDate && existingDate && isSameDay(newDate, existingDate)) {
-      return {
-        existingEvent: existing,
-        confidence: 0.95,
-        reason: `Exact title match "${newEvent.title}" on same day`,
-      };
+    // If titles match exactly (normalized) and within 12 hours, it's a duplicate
+    // (12hr window handles timezone edge cases where same local day = different UTC days)
+    if (newTitle === existingTitle && newDate && existingDate) {
+      const hoursDiff = Math.abs(differenceInHours(newDate, existingDate));
+      if (hoursDiff <= 12) {
+        return {
+          existingEvent: existing,
+          confidence: 0.95,
+          reason: `Exact title match "${newEvent.title}" within 12 hours`,
+        };
+      }
     }
 
     // If titles match and same venue (even if slightly different days due to timezone), it's a duplicate
