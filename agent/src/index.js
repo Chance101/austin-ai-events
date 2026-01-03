@@ -193,6 +193,27 @@ async function discoverEvents() {
         continue;
       }
 
+      // Skip events with invalid/placeholder titles
+      const invalidTitlePatterns = [
+        /^tbd$/i,
+        /^tba$/i,
+        /^coming soon$/i,
+        /^to be announced$/i,
+        /^to be determined$/i,
+        /^untitled$/i,
+        /^event$/i,
+        /^new event$/i,
+        /^test$/i,
+      ];
+      const titleTrimmed = event.title.trim();
+      if (
+        titleTrimmed.length < 5 ||
+        invalidTitlePatterns.some(pattern => pattern.test(titleTrimmed))
+      ) {
+        console.log(`  ⚠️  Skipping event with invalid title: "${titleTrimmed}"`);
+        continue;
+      }
+
       // Quick dedupe check by URL hash
       const hash = getEventHash(event);
       if (existingHashes.has(hash)) {

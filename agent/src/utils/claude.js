@@ -34,9 +34,28 @@ Evaluate this event and respond with a JSON object:
   "concerns": string[]       // any red flags or concerns
 }
 
-Consider:
+CRITICAL - AI/ML Focus Requirement:
+This event must be SPECIFICALLY about AI, machine learning, or LLMs. The event should focus on one or more of:
+- Artificial Intelligence (AI) or Machine Learning (ML)
+- Large Language Models (LLMs), GPT, Claude, Gemini, etc.
+- Generative AI, ChatGPT, Midjourney, Stable Diffusion
+- Neural networks, deep learning, transformers
+- NLP (Natural Language Processing) or Computer Vision with AI focus
+- AI agents, RAG, embeddings, vector databases
+- AI ethics, policy, safety, or alignment
+- Data science WITH explicit AI/ML applications
+
+REJECT events that are general tech without AI focus:
+- General programming (Python, JavaScript, etc.) without AI application
+- Data engineering, ETL, databases (unless AI-specific like vector DBs)
+- DevOps, cloud infrastructure, Kubernetes
+- IoT, hardware, Raspberry Pi, Arduino (unless AI at the edge)
+- Web development, mobile apps
+- Cybersecurity (unless AI-focused)
+- General networking or career events
+
+Other validation criteria:
 - Is this actually in Austin, TX (not virtual-only, not another city)?
-- Is it related to AI, ML, data science, or adjacent tech topics?
 - Does it appear to be a legitimate event (not spam, not a job posting)?
 - Is the date in the future (after ${today})?
 - Events scheduled months in advance are normal for recurring meetups - do NOT reject events just because they are in 2026 or later`;

@@ -39,6 +39,15 @@ export async function scrapeMeetup(sourceConfig) {
       return events;
     }
 
+    // Extract the group name from Apollo state
+    let groupName = sourceConfig.name; // fallback to config name
+    for (const [key, value] of Object.entries(apolloState)) {
+      if (key.startsWith('Group:') && value?.name) {
+        groupName = value.name;
+        break;
+      }
+    }
+
     // Extract venues for reference
     const venues = {};
     for (const [key, value] of Object.entries(apolloState)) {
@@ -79,7 +88,7 @@ export async function scrapeMeetup(sourceConfig) {
           venue_name: venueName,
           address: venueAddress,
           is_free: isFree,
-          organizer: sourceConfig.name,
+          organizer: groupName,
           image_url: value.featuredEventPhoto?.highRes || null,
         });
       }
