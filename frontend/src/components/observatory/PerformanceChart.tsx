@@ -1,0 +1,104 @@
+'use client';
+
+import { useMemo } from 'react';
+import {
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from 'recharts';
+import { format, parseISO } from 'date-fns';
+import { DailyStats } from '@/types/observatory';
+
+interface PerformanceChartProps {
+  data: DailyStats[];
+  loading: boolean;
+}
+
+export default function PerformanceChart({ data, loading }: PerformanceChartProps) {
+  const chartData = useMemo(() => {
+    return data.map((d) => ({
+      ...d,
+      dateLabel: format(parseISO(d.date), 'MMM d'),
+    }));
+  }, [data]);
+
+  if (loading) {
+    return (
+      <div className="bg-white rounded-lg shadow-md border border-gray-200 p-6">
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">Events Added (Last 30 Days)</h3>
+        <div className="h-64 bg-gray-100 rounded animate-pulse"></div>
+      </div>
+    );
+  }
+
+  const totalEvents = data.reduce((sum, d) => sum + d.events_added, 0);
+  const avgPerDay = data.length > 0 ? (totalEvents / data.length).toFixed(1) : '0';
+
+  return (
+    <div className="bg-white rounded-lg shadow-md border border-gray-200 p-6">
+      <div className="flex items-start justify-between mb-4">
+        <div>
+          <h3 className="text-lg font-semibold text-gray-900">Events Added (Last 30 Days)</h3>
+          <p className="text-sm text-gray-500">Daily event additions from agent runs</p>
+        </div>
+        <div className="text-right">
+          <p className="text-2xl font-bold text-blue-600">{totalEvents}</p>
+          <p className="text-xs text-gray-500">{avgPerDay}/day avg</p>
+        </div>
+      </div>
+
+      {data.length === 0 ? (
+        <div className="h-64 flex items-center justify-center text-gray-500">
+          No data available yet
+        </div>
+      ) : (
+        <div className="h-64">
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
+              <defs>
+                <linearGradient id="colorEvents" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+              <XAxis
+                dataKey="dateLabel"
+                tick={{ fontSize: 12, fill: '#6b7280' }}
+                tickLine={false}
+                axisLine={{ stroke: '#e5e7eb' }}
+              />
+              <YAxis
+                tick={{ fontSize: 12, fill: '#6b7280' }}
+                tickLine={false}
+                axisLine={{ stroke: '#e5e7eb' }}
+                allowDecimals={false}
+              />
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: '#fff',
+                  border: '1px solid #e5e7eb',
+                  borderRadius: '8px',
+                  fontSize: '12px',
+                }}
+                formatter={(value) => [`${value ?? 0} events`, 'Added']}
+                labelFormatter={(label) => label}
+              />
+              <Area
+                type="monotone"
+                dataKey="events_added"
+                stroke="#3b82f6"
+                strokeWidth={2}
+                fill="url(#colorEvents)"
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </div>
+  );
+}
