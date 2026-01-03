@@ -6,6 +6,7 @@ import { subDays } from 'date-fns';
 import { supabase } from '@/lib/supabase';
 import { AgentRun, Source, SearchQuery, DailyStats } from '@/types/observatory';
 import { Event } from '@/types/event';
+import HowItWorks from '@/components/observatory/HowItWorks';
 import LastRunCard from '@/components/observatory/LastRunCard';
 import ActivityFeed from '@/components/observatory/ActivityFeed';
 import DiscoveryStats from '@/components/observatory/DiscoveryStats';
@@ -164,6 +165,11 @@ export default function ObservatoryPage() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* How It Works - Full Width */}
+        <div className="mb-8">
+          <HowItWorks />
+        </div>
+
         {/* Last Run Card - Full Width */}
         <div className="mb-8">
           <LastRunCard run={lastRun} loading={loading} />
