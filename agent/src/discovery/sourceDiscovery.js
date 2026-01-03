@@ -420,8 +420,9 @@ async function addNewQueries(queries) {
 
 /**
  * Main source discovery function
+ * @param {Object} runStats - Optional run stats object to track API calls
  */
-export async function discoverSources() {
+export async function discoverSources(runStats = null) {
   console.log('🔍 Starting source discovery...\n');
 
   const stats = {
@@ -431,6 +432,8 @@ export async function discoverSources() {
     trustedSourcesAdded: 0,
     queriesDeactivated: 0,
     newQueriesAdded: 0,
+    claudeApiCalls: 0,
+    serpapiCalls: 0,
   };
 
   // Get active queries and known sources
@@ -446,6 +449,7 @@ export async function discoverSources() {
     stats.queriesRun++;
 
     const searchResults = await searchForSources(query.query_text);
+    stats.serpapiCalls++;  // Track SerpAPI call
     console.log(`    Found ${searchResults.length} search results`);
 
     let sourcesFoundThisQuery = 0;
@@ -468,6 +472,7 @@ export async function discoverSources() {
       console.log(`    🔎 Evaluating: ${result.url.substring(0, 60)}...`);
 
       const evaluation = await evaluateSource(result);
+      stats.claudeApiCalls++;  // Track Claude API call
       if (!evaluation) continue;
 
       // Only add if it meets our criteria
@@ -518,6 +523,7 @@ export async function discoverSources() {
 
   const allQueryTexts = (allQueries || []).map(q => q.query_text);
   const suggestedQueries = await suggestNewQueries(discoveredSources, allQueryTexts);
+  stats.claudeApiCalls++;  // Track Claude API call for query suggestion
 
   if (suggestedQueries.length > 0) {
     stats.newQueriesAdded = await addNewQueries(suggestedQueries);

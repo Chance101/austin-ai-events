@@ -25,8 +25,11 @@ function normalizeVenue(venue) {
 
 /**
  * Find potential duplicates using fuzzy matching + AI reasoning
+ * @param {Object} newEvent - The new event to check
+ * @param {Array} existingEvents - Array of existing events to compare against
+ * @param {Object} runStats - Optional run stats object for tracking API calls
  */
-export async function findDuplicates(newEvent, existingEvents) {
+export async function findDuplicates(newEvent, existingEvents, runStats = null) {
   // Quick check: exact title + same day + same venue = definite duplicate
   const newTitle = normalizeTitle(newEvent.title || '');
   const newVenue = normalizeVenue(newEvent.venue_name);
@@ -90,7 +93,8 @@ export async function findDuplicates(newEvent, existingEvents) {
   // Second pass: AI-powered duplicate detection
   for (const match of potentialDupes) {
     try {
-      const result = await checkDuplicate(newEvent, match.item);
+      const result = await checkDuplicate(newEvent, match.item, runStats);
+      if (runStats) runStats.claudeApiCalls++;  // Track Claude API call
       if (result.isDuplicate && result.confidence > 0.7) {
         return {
           existingEvent: match.item,

@@ -12,8 +12,10 @@ export function getClient() {
 
 /**
  * Use Claude to determine if a potential event is legitimate and relevant
+ * @param {Object} eventData - The event data to validate
+ * @param {Object} runStats - Optional run stats object (tracking done at call site)
  */
-export async function validateEvent(eventData) {
+export async function validateEvent(eventData, runStats = null) {
   const anthropic = getClient();
   const today = new Date().toISOString().split('T')[0];
 
@@ -62,8 +64,10 @@ Consider:
 
 /**
  * Use Claude to classify an event by audience and technical level
+ * @param {Object} eventData - The event data to classify
+ * @param {Object} runStats - Optional run stats object (tracking done at call site)
  */
-export async function classifyEvent(eventData) {
+export async function classifyEvent(eventData, runStats = null) {
   const anthropic = getClient();
 
   const prompt = `Classify this AI/ML event and create a clean summary.
@@ -125,8 +129,11 @@ Guidelines for summary:
 
 /**
  * Use Claude to determine if two events are duplicates
+ * @param {Object} event1 - First event to compare
+ * @param {Object} event2 - Second event to compare
+ * @param {Object} runStats - Optional run stats object (tracking done at call site)
  */
-export async function checkDuplicate(event1, event2) {
+export async function checkDuplicate(event1, event2, runStats = null) {
   const anthropic = getClient();
 
   const prompt = `Determine if these two events are the same event (duplicates).

@@ -59,3 +59,40 @@ export async function markEventAsVerified(eventId) {
     throw error;
   }
 }
+
+/**
+ * Log agent run statistics to the database
+ */
+export async function logAgentRun(stats) {
+  const db = getSupabase();
+  const now = new Date().toISOString();
+  const runDuration = Math.round((Date.now() - stats.startTime) / 1000);
+
+  const { error } = await db
+    .from('agent_runs')
+    .insert({
+      run_type: stats.runType,
+      started_at: new Date(stats.startTime).toISOString(),
+      completed_at: now,
+      run_duration_seconds: runDuration,
+      queries_run: stats.queriesRun,
+      new_sources_found: stats.newSourcesFound,
+      new_queries_generated: stats.newQueriesGenerated,
+      sources_scraped: stats.sourcesScraped,
+      events_discovered: stats.eventsDiscovered,
+      events_validated: stats.eventsValidated,
+      events_added: stats.eventsAdded,
+      events_updated: stats.eventsUpdated,
+      duplicates_skipped: stats.duplicatesSkipped,
+      errors: stats.errors,
+      error_messages: stats.errorMessages,
+      claude_api_calls: stats.claudeApiCalls,
+      serpapi_calls: stats.serpapiCalls,
+    });
+
+  if (error) {
+    console.error('Failed to log agent run:', error.message);
+  } else {
+    console.log(`\n✅ Run logged to agent_runs table (${runDuration}s)`);
+  }
+}

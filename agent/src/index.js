@@ -9,8 +9,31 @@ import { scrapeAustinAI } from './sources/austinai.js';
 import { scrapeLeadersInAI } from './sources/leadersinai.js';
 import { validateEvent, classifyEvent } from './utils/claude.js';
 import { findDuplicates, getEventHash } from './utils/dedup.js';
-import { upsertEvent, getExistingEvents } from './utils/supabase.js';
+import { upsertEvent, getExistingEvents, logAgentRun } from './utils/supabase.js';
 import { discoverSources, getTrustedSources, updateSourceStats } from './discovery/sourceDiscovery.js';
+
+/**
+ * Create initial run stats object for tracking throughout the pipeline
+ */
+function createRunStats() {
+  return {
+    runType: process.env.RUN_TYPE || 'scheduled',
+    startTime: Date.now(),
+    queriesRun: 0,
+    newSourcesFound: 0,
+    newQueriesGenerated: 0,
+    sourcesScraped: 0,
+    eventsDiscovered: 0,
+    eventsValidated: 0,
+    eventsAdded: 0,
+    eventsUpdated: 0,
+    duplicatesSkipped: 0,
+    errors: 0,
+    errorMessages: [],
+    claudeApiCalls: 0,
+    serpapiCalls: 0,
+  };
+}
 
 /**
  * Map database source_type to scraper type
@@ -30,24 +53,13 @@ function mapSourceType(dbType) {
 async function discoverEvents() {
   console.log('🚀 Starting Austin AI Events discovery...\n');
 
+  // Initialize run stats for tracking throughout the pipeline
+  const runStats = createRunStats();
+
   // Validate configuration
   validateConfig();
 
   const allDiscoveredEvents = [];
-  const stats = {
-    sourcesScraped: 0,
-    eventsDiscovered: 0,
-    eventsValidated: 0,
-    duplicatesSkipped: 0,
-    missingDates: 0,
-    eventsAdded: 0,
-    eventsUpdated: 0,
-    errors: 0,
-    // Discovery stats
-    newSourcesDiscovered: 0,
-    queriesRun: 0,
-    newQueriesAdded: 0,
-  };
 
   // 0. Run source discovery first (find new sources via search)
   console.log('=' .repeat(50));
@@ -55,13 +67,16 @@ async function discoverEvents() {
   console.log('=' .repeat(50) + '\n');
 
   try {
-    const discoveryStats = await discoverSources();
-    stats.newSourcesDiscovered = discoveryStats.sourcesDiscovered;
-    stats.queriesRun = discoveryStats.queriesRun;
-    stats.newQueriesAdded = discoveryStats.newQueriesAdded;
+    const discoveryStats = await discoverSources(runStats);
+    runStats.queriesRun = discoveryStats.queriesRun;
+    runStats.newSourcesFound = discoveryStats.sourcesDiscovered;
+    runStats.newQueriesGenerated = discoveryStats.newQueriesAdded;
+    runStats.serpapiCalls += discoveryStats.serpapiCalls || 0;
+    runStats.claudeApiCalls += discoveryStats.claudeApiCalls || 0;
   } catch (error) {
     console.error('Source discovery error:', error.message);
-    stats.errors++;
+    runStats.errors++;
+    runStats.errorMessages.push(`Source discovery: ${error.message}`);
   }
 
   // 1. Get all sources to scrape (config + trusted DB sources)
@@ -133,7 +148,7 @@ async function discoverEvents() {
 
       console.log(`    Found ${events.length} events`);
       allDiscoveredEvents.push(...events);
-      stats.sourcesScraped++;
+      runStats.sourcesScraped++;
 
       // Update source stats in DB
       if (source.fromDb || source.url) {
@@ -142,23 +157,26 @@ async function discoverEvents() {
 
     } catch (error) {
       console.error(`    Error: ${error.message}`);
-      stats.errors++;
+      runStats.errors++;
+      runStats.errorMessages.push(`Scrape ${source.name}: ${error.message}`);
     }
   }
 
   // 2. Web search for additional events
   console.log('\n🔍 Searching web for additional events...');
   try {
-    const searchResults = await searchEvents();
+    const { events: searchResults, serpapiCalls } = await searchEvents(runStats);
     console.log(`  Found ${searchResults.length} potential events from web search`);
     allDiscoveredEvents.push(...searchResults);
+    runStats.serpapiCalls += serpapiCalls || 0;
   } catch (error) {
     console.error(`  Search error: ${error.message}`);
-    stats.errors++;
+    runStats.errors++;
+    runStats.errorMessages.push(`Web search: ${error.message}`);
   }
 
-  stats.eventsDiscovered = allDiscoveredEvents.length;
-  console.log(`\n📊 Total events discovered: ${stats.eventsDiscovered}`);
+  runStats.eventsDiscovered = allDiscoveredEvents.length;
+  console.log(`\n📊 Total events discovered: ${runStats.eventsDiscovered}`);
 
   // 3. Get existing events for deduplication
   console.log('\n🔄 Checking for duplicates...');
@@ -179,38 +197,39 @@ async function discoverEvents() {
       const hash = getEventHash(event);
       if (existingHashes.has(hash)) {
         console.log(`  ⏭️  Skipping (URL match): ${event.title?.substring(0, 50)}...`);
-        stats.duplicatesSkipped++;
+        runStats.duplicatesSkipped++;
         continue;
       }
 
       // Validate with Claude
       console.log(`  🔍 Validating: ${event.title?.substring(0, 50)}...`);
-      const validation = await validateEvent(event);
+      const validation = await validateEvent(event, runStats);
+      runStats.claudeApiCalls++;
 
       if (!validation.isValid || validation.confidence < 0.6) {
         console.log(`    ❌ Invalid: ${validation.reason}`);
         continue;
       }
 
-      stats.eventsValidated++;
+      runStats.eventsValidated++;
 
       // Check for fuzzy duplicates
-      const duplicate = await findDuplicates(event, existingEvents);
+      const duplicate = await findDuplicates(event, existingEvents, runStats);
       if (duplicate) {
         console.log(`    ⏭️  Duplicate of existing event: ${duplicate.reason}`);
-        stats.duplicatesSkipped++;
+        runStats.duplicatesSkipped++;
         continue;
       }
 
       // Skip events without start_time (required field)
       if (!event.start_time) {
         console.log(`    ⚠️  Skipping (no date): ${event.title?.substring(0, 40)}`);
-        stats.missingDates++;
         continue;
       }
 
       // Classify the event
-      const classification = await classifyEvent(event);
+      const classification = await classifyEvent(event, runStats);
+      runStats.claudeApiCalls++;
 
       // Prepare event for database
       // Use AI-generated summary if available, otherwise fall back to original description
@@ -237,7 +256,7 @@ async function discoverEvents() {
       // Upsert to database
       const result = await upsertEvent(dbEvent);
       console.log(`    ✅ Added: ${result.title}`);
-      stats.eventsAdded++;
+      runStats.eventsAdded++;
 
       // Add to existing events for dedup checking
       existingEvents.push(result);
@@ -248,7 +267,8 @@ async function discoverEvents() {
 
     } catch (error) {
       console.error(`    ❌ Error processing event: ${error.message}`);
-      stats.errors++;
+      runStats.errors++;
+      runStats.errorMessages.push(`Process event: ${error.message}`);
     }
   }
 
@@ -257,20 +277,25 @@ async function discoverEvents() {
   console.log('📈 FINAL SUMMARY');
   console.log('='.repeat(50));
   console.log('\n  Source Discovery:');
-  console.log(`    Queries run:          ${stats.queriesRun}`);
-  console.log(`    New sources found:    ${stats.newSourcesDiscovered}`);
-  console.log(`    New queries added:    ${stats.newQueriesAdded}`);
+  console.log(`    Queries run:          ${runStats.queriesRun}`);
+  console.log(`    New sources found:    ${runStats.newSourcesFound}`);
+  console.log(`    New queries added:    ${runStats.newQueriesGenerated}`);
   console.log('\n  Event Scraping:');
-  console.log(`    Sources scraped:      ${stats.sourcesScraped}`);
-  console.log(`    Events discovered:    ${stats.eventsDiscovered}`);
-  console.log(`    Events validated:     ${stats.eventsValidated}`);
-  console.log(`    Missing dates:        ${stats.missingDates}`);
-  console.log(`    Duplicates skipped:   ${stats.duplicatesSkipped}`);
-  console.log(`    Events added:         ${stats.eventsAdded}`);
-  console.log(`    Errors:               ${stats.errors}`);
+  console.log(`    Sources scraped:      ${runStats.sourcesScraped}`);
+  console.log(`    Events discovered:    ${runStats.eventsDiscovered}`);
+  console.log(`    Events validated:     ${runStats.eventsValidated}`);
+  console.log(`    Duplicates skipped:   ${runStats.duplicatesSkipped}`);
+  console.log(`    Events added:         ${runStats.eventsAdded}`);
+  console.log('\n  API Usage:');
+  console.log(`    Claude API calls:     ${runStats.claudeApiCalls}`);
+  console.log(`    SerpAPI calls:        ${runStats.serpapiCalls}`);
+  console.log(`    Errors:               ${runStats.errors}`);
   console.log('='.repeat(50));
 
-  return stats;
+  // 6. Log run to database
+  await logAgentRun(runStats);
+
+  return runStats;
 }
 
 // Run if called directly

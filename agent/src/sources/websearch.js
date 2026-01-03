@@ -3,14 +3,17 @@ import { config } from '../config.js';
 
 /**
  * Search for AI events in Austin using SerpAPI
+ * @param {Object} runStats - Optional run stats object for tracking API calls
+ * @returns {Object} Object with events array and serpapiCalls count
  */
-export async function searchEvents() {
+export async function searchEvents(runStats = null) {
   if (!config.serpApiKey) {
     console.log('SerpAPI key not configured, skipping web search');
-    return [];
+    return { events: [], serpapiCalls: 0 };
   }
 
   const events = [];
+  let serpapiCalls = 0;
 
   for (const query of config.searchQueries) {
     try {
@@ -24,6 +27,7 @@ export async function searchEvents() {
         hl: 'en',
         num: 10,
       });
+      serpapiCalls++;  // Track SerpAPI call
 
       // Process organic results
       if (results.organic_results) {
@@ -76,9 +80,11 @@ export async function searchEvents() {
 
   // Dedupe by URL
   const seen = new Set();
-  return events.filter(e => {
+  const dedupedEvents = events.filter(e => {
     if (seen.has(e.url)) return false;
     seen.add(e.url);
     return true;
   });
+
+  return { events: dedupedEvents, serpapiCalls };
 }
