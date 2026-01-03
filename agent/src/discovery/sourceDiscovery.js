@@ -6,23 +6,125 @@ import { getSupabase } from '../utils/supabase.js';
 const supabase = getSupabase();
 
 /**
- * Fetch top active search queries ordered by success rate, then least-run
+ * Recalculate priority scores for all active queries using time decay.
+ * Priority decays by 10% per day since last success (or creation if never successful).
+ * Minimum priority is 0.01 to ensure queries never fully disappear.
+ */
+export async function recalculatePriorityScores() {
+  const { data: queries, error } = await supabase
+    .from('search_queries')
+    .select('id, last_success_at, created_at')
+    .eq('is_active', true);
+
+  if (error) {
+    console.error('Error fetching queries for priority update:', error.message);
+    return;
+  }
+
+  if (!queries || queries.length === 0) return;
+
+  const now = Date.now();
+  const updates = [];
+
+  for (const query of queries) {
+    const referenceDate = query.last_success_at
+      ? new Date(query.last_success_at)
+      : new Date(query.created_at || now);
+
+    const daysSinceSuccess = (now - referenceDate.getTime()) / (1000 * 60 * 60 * 24);
+
+    // Decay formula: starts at 1.0, decays by 10% per day, minimum 0.01
+    const priority = Math.max(0.01, Math.pow(0.9, daysSinceSuccess));
+
+    updates.push({ id: query.id, priority_score: priority });
+  }
+
+  // Batch update priorities
+  for (const update of updates) {
+    await supabase
+      .from('search_queries')
+      .update({ priority_score: update.priority_score })
+      .eq('id', update.id);
+  }
+
+  console.log(`    Updated priority scores for ${updates.length} queries`);
+}
+
+/**
+ * Fetch queries using exploration budget strategy:
+ * - 3 queries: highest priority_score (exploitation)
+ * - 1 query: lowest priority_score among active (exploration)
+ * - 1 query: most recent unrun agent-generated query OR second-lowest priority (experimentation)
  */
 export async function getActiveQueries(limit = 5) {
-  const { data, error } = await supabase
+  // First, recalculate all priority scores
+  await recalculatePriorityScores();
+
+  const selectedQueries = [];
+  const selectedIds = new Set();
+
+  // 1. Get top 3 highest priority queries (exploitation)
+  const { data: highPriority, error: highError } = await supabase
     .from('search_queries')
     .select('*')
     .eq('is_active', true)
-    .order('sources_found', { ascending: false })
-    .order('times_run', { ascending: true })
-    .limit(limit);
+    .order('priority_score', { ascending: false })
+    .limit(3);
 
-  if (error) {
-    console.error('Error fetching queries:', error.message);
+  if (highError) {
+    console.error('Error fetching high priority queries:', highError.message);
     return [];
   }
 
-  return data || [];
+  for (const q of (highPriority || [])) {
+    selectedQueries.push(q);
+    selectedIds.add(q.id);
+  }
+
+  // 2. Get lowest priority query (exploration)
+  const { data: lowPriority, error: lowError } = await supabase
+    .from('search_queries')
+    .select('*')
+    .eq('is_active', true)
+    .order('priority_score', { ascending: true })
+    .limit(2);
+
+  if (!lowError && lowPriority) {
+    // Find lowest that isn't already selected
+    for (const q of lowPriority) {
+      if (!selectedIds.has(q.id)) {
+        selectedQueries.push(q);
+        selectedIds.add(q.id);
+        break;
+      }
+    }
+  }
+
+  // 3. Get experimental query: unrun agent-generated OR second-lowest priority
+  // First try: most recent agent-generated query that hasn't been run
+  const { data: unrunAgent, error: unrunError } = await supabase
+    .from('search_queries')
+    .select('*')
+    .eq('is_active', true)
+    .eq('created_by', 'agent')
+    .eq('times_run', 0)
+    .order('created_at', { ascending: false })
+    .limit(1);
+
+  if (!unrunError && unrunAgent && unrunAgent.length > 0 && !selectedIds.has(unrunAgent[0].id)) {
+    selectedQueries.push(unrunAgent[0]);
+    selectedIds.add(unrunAgent[0].id);
+  } else {
+    // Fallback: second-lowest priority
+    if (lowPriority && lowPriority.length > 1 && !selectedIds.has(lowPriority[1].id)) {
+      selectedQueries.push(lowPriority[1]);
+      selectedIds.add(lowPriority[1].id);
+    }
+  }
+
+  console.log(`    Selected ${selectedQueries.length} queries using exploration budget`);
+
+  return selectedQueries;
 }
 
 /**
@@ -173,59 +275,76 @@ async function addSource(urlInfo, evaluation) {
 }
 
 /**
- * Update query statistics
+ * Update query statistics after a run.
+ * On success (sourcesFound > 0): reset priority_score to 1.0 and set last_success_at
  */
 async function updateQueryStats(queryId, sourcesFound) {
+  const now = new Date().toISOString();
+
+  // Get current values for incrementing
+  const { data: current } = await supabase
+    .from('search_queries')
+    .select('times_run, sources_found')
+    .eq('id', queryId)
+    .single();
+
+  if (!current) {
+    console.error(`    Could not find query ${queryId} to update stats`);
+    return;
+  }
+
+  // Build update object
+  const updateData = {
+    times_run: (current.times_run || 0) + 1,
+    sources_found: (current.sources_found || 0) + sourcesFound,
+    last_run: now,
+  };
+
+  // On success: reset priority and update last_success_at
+  if (sourcesFound > 0) {
+    updateData.priority_score = 1.0;
+    updateData.last_success_at = now;
+  }
+
   const { error } = await supabase
     .from('search_queries')
-    .update({
-      times_run: supabase.rpc('increment', { x: 1 }),
-      sources_found: supabase.rpc('increment', { x: sourcesFound }),
-      last_run: new Date().toISOString(),
-    })
+    .update(updateData)
     .eq('id', queryId);
 
-  // Fallback if RPC doesn't work
   if (error) {
-    const { data: current } = await supabase
-      .from('search_queries')
-      .select('times_run, sources_found')
-      .eq('id', queryId)
-      .single();
-
-    if (current) {
-      await supabase
-        .from('search_queries')
-        .update({
-          times_run: (current.times_run || 0) + 1,
-          sources_found: (current.sources_found || 0) + sourcesFound,
-          last_run: new Date().toISOString(),
-        })
-        .eq('id', queryId);
-    }
+    console.error(`    Error updating query stats: ${error.message}`);
   }
 }
 
 /**
- * Deactivate underperforming queries
+ * Deactivate underperforming queries with strict criteria.
+ * Only deactivate if ALL conditions are met:
+ * - created_by = 'agent' (NEVER deactivate seed queries)
+ * - times_run >= 10
+ * - sources_found = 0
+ * - priority_score < 0.01
  */
 async function deactivateFailedQueries() {
+  // Only consider agent-created queries with 10+ runs
   const { data: queries } = await supabase
     .from('search_queries')
-    .select('id, query_text, times_run, sources_found')
+    .select('id, query_text, times_run, sources_found, priority_score, created_by')
     .eq('is_active', true)
-    .gte('times_run', 5);
+    .eq('created_by', 'agent')  // Never deactivate seed queries
+    .gte('times_run', 10)
+    .eq('sources_found', 0);
 
   if (!queries) return 0;
 
   let deactivated = 0;
   for (const query of queries) {
-    if (query.sources_found === 0) {
+    // Final check: only deactivate if priority has fully decayed
+    if (query.priority_score < 0.01) {
       await supabase
         .from('search_queries')
         .update({ is_active: false })
         .eq('id', query.id);
-      console.log(`    Deactivated underperforming query: "${query.query_text}"`);
+      console.log(`    Deactivated underperforming query: "${query.query_text}" (${query.times_run} runs, priority: ${query.priority_score.toFixed(4)})`);
       deactivated++;
     }
   }
