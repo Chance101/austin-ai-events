@@ -1,11 +1,59 @@
 import Link from "next/link";
-import EventList from "@/components/EventList";
+import { fetchEventsServer } from "@/lib/supabase-server";
+import EventListClient from "@/components/EventListClient";
 import PageTracker from "@/components/PageTracker";
+import { Event } from "@/types/event";
 
-export default function Home() {
+// ISR: Revalidate every 5 minutes
+export const revalidate = 300;
+
+function getEventLocation(event: Event): string {
+  return event.venue_name || event.location || event.address || "Austin, TX";
+}
+
+function generateJsonLd(events: Event[]) {
+  return {
+    "@context": "https://schema.org",
+    "@type": "ItemList",
+    "name": "Austin AI Events",
+    "description": "Upcoming AI meetups, workshops, and conferences in Austin, TX",
+    "itemListElement": events.map((event, index) => ({
+      "@type": "Event",
+      "position": index + 1,
+      "name": event.title,
+      "startDate": event.start_time,
+      "endDate": event.end_time || undefined,
+      "location": {
+        "@type": "Place",
+        "name": getEventLocation(event),
+        "address": event.address || "Austin, TX"
+      },
+      "description": event.description || undefined,
+      "organizer": event.organizer ? {
+        "@type": "Organization",
+        "name": event.organizer
+      } : undefined,
+      "url": event.url,
+      "isAccessibleForFree": event.is_free ?? undefined,
+      "eventAttendanceMode": "https://schema.org/OfflineEventAttendanceMode"
+    }))
+  };
+}
+
+export default async function Home() {
+  const events = await fetchEventsServer();
+  const jsonLd = generateJsonLd(events);
+
   return (
     <div className="min-h-screen">
       <PageTracker page="/" />
+
+      {/* JSON-LD Structured Data for SEO */}
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
+
       <header className="bg-white border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-start justify-between">
@@ -32,7 +80,7 @@ export default function Home() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <EventList />
+        <EventListClient initialEvents={events} />
       </main>
 
       <footer className="bg-white border-t border-gray-200 mt-auto">
