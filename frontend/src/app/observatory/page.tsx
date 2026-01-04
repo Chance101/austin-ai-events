@@ -175,23 +175,32 @@ export default function ObservatoryPage() {
           <LastRunCard run={lastRun} loading={loading} />
         </div>
 
-        {/* Main Grid */}
+        {/* First Row - Performance Chart + System Health (same height) */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
+          <div className="lg:col-span-2 flex">
+            <div className="flex-1 flex flex-col">
+              <PerformanceChart data={dailyStats} loading={loading} />
+            </div>
+          </div>
+          <div className="flex">
+            <div className="flex-1 flex flex-col">
+              <SystemHealth
+                totalRuns={totalRuns}
+                successfulRuns={successfulRuns}
+                averageEventsPerRun={averageEventsPerRun}
+                totalEventsAdded={totalEventsAdded}
+                loading={loading}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Second Row - Activity Feed + Discovery/Learning */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Left Column - Activity Feed */}
-          <div className="lg:col-span-2 space-y-8">
-            <PerformanceChart data={dailyStats} loading={loading} />
+          <div className="lg:col-span-2">
             <ActivityFeed events={recentEvents} loading={loading} />
           </div>
-
-          {/* Right Column - Stats */}
           <div className="space-y-8">
-            <SystemHealth
-              totalRuns={totalRuns}
-              successfulRuns={successfulRuns}
-              averageEventsPerRun={averageEventsPerRun}
-              totalEventsAdded={totalEventsAdded}
-              loading={loading}
-            />
             <DiscoveryStats
               totalSources={totalSources}
               recentSources={recentSources}

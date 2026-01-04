@@ -31,7 +31,7 @@ export default function SystemHealth({
   const successRate = totalRuns > 0 ? ((successfulRuns / totalRuns) * 100).toFixed(1) : '0';
 
   return (
-    <div className="bg-white rounded-lg shadow-md border border-gray-200 p-6">
+    <div className="bg-white rounded-lg shadow-md border border-gray-200 p-6 h-full flex flex-col">
       <h3 className="text-lg font-semibold text-gray-900 mb-4">System Health</h3>
 
       <div className="grid grid-cols-2 gap-4">
@@ -65,6 +65,12 @@ export default function SystemHealth({
           ></div>
         </div>
       </div>
+
+      <div className="flex-1"></div>
+
+      <p className="mt-4 text-xs text-gray-400 text-center">
+        Tracking since January 3, 2026
+      </p>
     </div>
   );
 }

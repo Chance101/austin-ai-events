@@ -39,7 +39,7 @@ export default function PerformanceChart({ data, loading }: PerformanceChartProp
   const avgPerDay = data.length > 0 ? (totalEvents / data.length).toFixed(1) : '0';
 
   return (
-    <div className="bg-white rounded-lg shadow-md border border-gray-200 p-6">
+    <div className="bg-white rounded-lg shadow-md border border-gray-200 p-6 h-full flex flex-col">
       <div className="flex items-start justify-between mb-4">
         <div>
           <h3 className="text-lg font-semibold text-gray-900">Events Added (Last 30 Days)</h3>
@@ -52,11 +52,11 @@ export default function PerformanceChart({ data, loading }: PerformanceChartProp
       </div>
 
       {data.length === 0 ? (
-        <div className="h-64 flex items-center justify-center text-gray-500">
+        <div className="flex-1 flex items-center justify-center text-gray-500">
           No data available yet
         </div>
       ) : (
-        <div className="h-64">
+        <div className="flex-1 min-h-[200px]">
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
               <defs>
@@ -99,6 +99,10 @@ export default function PerformanceChart({ data, loading }: PerformanceChartProp
           </ResponsiveContainer>
         </div>
       )}
+
+      <p className="mt-4 text-xs text-gray-400 text-center">
+        Tracking since January 3, 2026
+      </p>
     </div>
   );
 }
