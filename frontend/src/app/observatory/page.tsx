@@ -13,6 +13,7 @@ import DiscoveryStats from '@/components/observatory/DiscoveryStats';
 import LearningActivity from '@/components/observatory/LearningActivity';
 import PerformanceChart from '@/components/observatory/PerformanceChart';
 import SystemHealth from '@/components/observatory/SystemHealth';
+import VisitorCounter from '@/components/observatory/VisitorCounter';
 
 export default function ObservatoryPage() {
   const [loading, setLoading] = useState(true);
@@ -209,6 +210,11 @@ export default function ObservatoryPage() {
             />
             <LearningActivity queries={agentQueries} loading={loading} />
           </div>
+        </div>
+
+        {/* Visitor Counter */}
+        <div className="mt-12">
+          <VisitorCounter />
         </div>
       </main>
 
