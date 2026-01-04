@@ -1,9 +1,11 @@
 import Link from "next/link";
 import EventList from "@/components/EventList";
+import PageTracker from "@/components/PageTracker";
 
 export default function Home() {
   return (
     <div className="min-h-screen">
+      <PageTracker page="/" />
       <header className="bg-white border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-start justify-between">

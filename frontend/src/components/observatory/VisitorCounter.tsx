@@ -13,18 +13,15 @@ function formatCount(num: number): string {
 
 export default function VisitorCounter() {
   const [counts, setCounts] = useState<Counts>({ humanCount: 0, botCount: 0 });
-  const [tracked, setTracked] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    if (tracked) return;
+    if (loaded) return;
 
-    const trackVisit = async () => {
+    const fetchCounts = async () => {
       try {
-        const response = await fetch('/api/track', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ page: 'observatory' }),
-        });
+        // Only fetch counts for the calendar page
+        const response = await fetch('/api/track?page=/');
 
         if (response.ok) {
           const data = await response.json();
@@ -34,13 +31,13 @@ export default function VisitorCounter() {
           });
         }
       } catch (error) {
-        console.error('Failed to track visit:', error);
+        console.error('Failed to fetch counts:', error);
       }
-      setTracked(true);
+      setLoaded(true);
     };
 
-    trackVisit();
-  }, [tracked]);
+    fetchCounts();
+  }, [loaded]);
 
   return (
     <div className="flex justify-center">
@@ -68,7 +65,7 @@ export default function VisitorCounter() {
               {formatCount(counts.humanCount)}
             </span>
             <span className="text-[10px] text-gray-500 uppercase tracking-widest">
-              Visitors
+              Calendar Visitors
             </span>
           </div>
         </div>
