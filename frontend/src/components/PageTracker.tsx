@@ -19,7 +19,7 @@ export default function PageTracker({ page }: PageTrackerProps) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ page }),
         });
-      } catch (error) {
+      } catch {
         // Silent fail
       }
       setTracked(true);

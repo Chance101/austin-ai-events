@@ -16,6 +16,7 @@ export default function EventList() {
 
   useEffect(() => {
     fetchEvents();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters, showAll]);
 
   const fetchEvents = async () => {
