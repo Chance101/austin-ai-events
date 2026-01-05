@@ -1,6 +1,19 @@
 import * as cheerio from 'cheerio';
 
 /**
+ * Get the year for an upcoming February event
+ * If we're past February, use next year; otherwise use current year
+ */
+function getUpcomingFebruaryYear() {
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth(); // 0-indexed, so February = 1
+
+  // If we're past February (month > 1), the next February event is next year
+  return currentMonth > 1 ? currentYear + 1 : currentYear;
+}
+
+/**
  * Scrape event from Leaders in AI Summit Austin page
  */
 export async function scrapeLeadersInAI(sourceConfig) {
@@ -27,13 +40,14 @@ export async function scrapeLeadersInAI(sourceConfig) {
         const data = JSON.parse($(script).html());
         if (data['@type'] === 'Event') {
           const startDate = new Date(data.startDate);
+          const eventYear = startDate.getFullYear();
           if (startDate >= new Date()) {
             events.push({
               title: data.name,
               description: data.description,
               url: sourceConfig.url,
               source: sourceConfig.id,
-              source_event_id: 'leaders-in-ai-austin-2026',
+              source_event_id: `leaders-in-ai-austin-${eventYear}`,
               start_time: data.startDate,
               end_time: data.endDate || null,
               venue_name: data.location?.name,
@@ -74,7 +88,8 @@ export async function scrapeLeadersInAI(sourceConfig) {
       const venueMatch = pageText.match(/Omni\s+Austin\s+Hotel\s+Downtown/i);
 
       if (dateMatch) {
-        const year = dateMatch[3] || '2026';
+        // Use parsed year or fall back to upcoming February year
+        const year = dateMatch[3] || getUpcomingFebruaryYear();
         const startDay = dateMatch[1];
         const endDay = dateMatch[2];
 
@@ -83,11 +98,11 @@ export async function scrapeLeadersInAI(sourceConfig) {
 
         if (startDate >= new Date()) {
           events.push({
-            title: 'Leaders In AI Summit Austin 2026',
+            title: `Leaders In AI Summit Austin ${year}`,
             description: 'Two-day executive summit featuring panels on scaling AI from vision to value, human-centric transformation, data strategy, autonomous systems, and operationalizing enterprise AI. Includes pre-summit workshop on agentic AI systems and governance.',
             url: sourceConfig.url,
             source: sourceConfig.id,
-            source_event_id: 'leaders-in-ai-austin-2026',
+            source_event_id: `leaders-in-ai-austin-${year}`,
             start_time: startDate.toISOString(),
             end_time: endDate.toISOString(),
             venue_name: venueMatch ? 'Omni Austin Hotel Downtown' : 'Austin, TX',
@@ -97,26 +112,8 @@ export async function scrapeLeadersInAI(sourceConfig) {
             image_url: null,
           });
         }
-      } else {
-        // Hardcoded fallback for known 2026 event if page structure prevents scraping
-        const knownEventDate = new Date('2026-02-17');
-        if (knownEventDate >= new Date()) {
-          events.push({
-            title: 'Leaders In AI Summit Austin 2026',
-            description: 'Two-day executive summit featuring panels on scaling AI from vision to value, human-centric transformation, data strategy, autonomous systems, and operationalizing enterprise AI. Includes pre-summit workshop on agentic AI systems and governance.',
-            url: sourceConfig.url,
-            source: sourceConfig.id,
-            source_event_id: 'leaders-in-ai-austin-2026',
-            start_time: new Date('2026-02-17').toISOString(),
-            end_time: new Date('2026-02-18').toISOString(),
-            venue_name: 'Omni Austin Hotel Downtown',
-            address: 'Omni Austin Hotel Downtown, Austin, TX',
-            is_free: false,
-            organizer: sourceConfig.name,
-            image_url: null,
-          });
-        }
       }
+      // Removed hardcoded fallback - rely on page scraping or JSON-LD only
     }
 
   } catch (error) {
