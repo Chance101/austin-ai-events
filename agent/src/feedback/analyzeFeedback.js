@@ -93,8 +93,11 @@ async function getAgentContext() {
  */
 async function analyzeWithClaude(missedEvent, context, wasFoundInfo) {
   const anthropic = getClient();
+  const today = new Date().toISOString().split('T')[0];
 
-  const prompt = `I missed this event that a user submitted as feedback:
+  const prompt = `I missed this event that a user submitted as feedback.
+
+Today's date is: ${today}
 
 Title: ${missedEvent.title}
 URL: ${missedEvent.url}
@@ -108,6 +111,8 @@ ${context.queries.length > 0 ? context.queries.map(q => `- "${q}"`).join('\n') :
 ${wasFoundInfo.found ? `Note: I DID find this event but may have rejected it during validation. Existing event in DB: ${JSON.stringify(wasFoundInfo.event, null, 2)}` : 'I did not find this event at all.'}
 
 Analyze why I missed this event and what I should do to catch similar events in the future.
+
+Important: Events in the current year or near future are valid. Do not assume years like 2026 are "far future" - check against today's date (${today}).
 
 Respond with ONLY valid JSON:
 {
