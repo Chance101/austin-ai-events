@@ -11,6 +11,7 @@ import { validateEvent, classifyEvent } from './utils/claude.js';
 import { findDuplicates, getEventHash } from './utils/dedup.js';
 import { upsertEvent, getExistingEvents, logAgentRun } from './utils/supabase.js';
 import { discoverSources, getTrustedSources, updateSourceStats } from './discovery/sourceDiscovery.js';
+import { analyzeUnprocessedFeedback } from './feedback/analyzeFeedback.js';
 
 /**
  * Create initial run stats object for tracking throughout the pipeline
@@ -32,6 +33,9 @@ function createRunStats() {
     errorMessages: [],
     claudeApiCalls: 0,
     serpapiCalls: 0,
+    feedbackAnalyzed: 0,
+    feedbackSourcesAdded: 0,
+    feedbackQueriesAdded: 0,
   };
 }
 
@@ -79,7 +83,23 @@ async function discoverEvents() {
     runStats.errorMessages.push(`Source discovery: ${error.message}`);
   }
 
-  // 1. Get all sources to scrape (config + trusted DB sources)
+  // 1.5. Analyze feedback on missed events
+  console.log('=' .repeat(50));
+  console.log('PHASE 1.5: FEEDBACK ANALYSIS');
+  console.log('=' .repeat(50) + '\n');
+
+  try {
+    const feedbackStats = await analyzeUnprocessedFeedback(runStats);
+    runStats.feedbackAnalyzed = feedbackStats.analyzed;
+    runStats.feedbackSourcesAdded = feedbackStats.sourcesAdded;
+    runStats.feedbackQueriesAdded = feedbackStats.queriesAdded;
+  } catch (error) {
+    console.error('Feedback analysis error:', error.message);
+    runStats.errors++;
+    runStats.errorMessages.push(`Feedback analysis: ${error.message}`);
+  }
+
+  // 2. Get all sources to scrape (config + trusted DB sources)
   console.log('=' .repeat(50));
   console.log('PHASE 2: EVENT SCRAPING');
   console.log('=' .repeat(50) + '\n');
@@ -301,6 +321,10 @@ async function discoverEvents() {
   console.log(`    Queries run:          ${runStats.queriesRun}`);
   console.log(`    New sources found:    ${runStats.newSourcesFound}`);
   console.log(`    New queries added:    ${runStats.newQueriesGenerated}`);
+  console.log('\n  Feedback Analysis:');
+  console.log(`    Events analyzed:      ${runStats.feedbackAnalyzed}`);
+  console.log(`    Sources added:        ${runStats.feedbackSourcesAdded}`);
+  console.log(`    Queries added:        ${runStats.feedbackQueriesAdded}`);
   console.log('\n  Event Scraping:');
   console.log(`    Sources scraped:      ${runStats.sourcesScraped}`);
   console.log(`    Events discovered:    ${runStats.eventsDiscovered}`);
