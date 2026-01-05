@@ -3,9 +3,22 @@ import { fetchEventsServer } from "@/lib/supabase-server";
 import EventListClient from "@/components/EventListClient";
 import PageTracker from "@/components/PageTracker";
 import { Event } from "@/types/event";
+import { formatInTimeZone } from "date-fns-tz";
 
 // ISR: Revalidate every 5 minutes
 export const revalidate = 300;
+
+const AUSTIN_TIMEZONE = "America/Chicago";
+
+/**
+ * Format a UTC timestamp as Austin local time with timezone offset for JSON-LD
+ * Output: "2026-01-07T18:00:00-06:00" (or -05:00 during DST)
+ */
+function formatForJsonLd(utcTime: string): string {
+  const date = new Date(utcTime);
+  // Format as ISO with Austin timezone offset (handles DST automatically)
+  return formatInTimeZone(date, AUSTIN_TIMEZONE, "yyyy-MM-dd'T'HH:mm:ssXXX");
+}
 
 function getEventLocation(event: Event): string {
   return event.venue_name || event.location || event.address || "Austin, TX";
@@ -21,8 +34,8 @@ function generateJsonLd(events: Event[]) {
       "@type": "Event",
       "position": index + 1,
       "name": event.title,
-      "startDate": event.start_time,
-      "endDate": event.end_time || undefined,
+      "startDate": formatForJsonLd(event.start_time),
+      "endDate": event.end_time ? formatForJsonLd(event.end_time) : undefined,
       "location": {
         "@type": "Place",
         "name": getEventLocation(event),
