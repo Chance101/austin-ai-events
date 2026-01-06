@@ -205,9 +205,22 @@ URL: ${urlInfo.url}
 Title: ${urlInfo.title}
 Snippet: ${urlInfo.snippet}
 
+CRITICAL: Only accept URLs that are event LISTING pages (showing multiple upcoming events).
+REJECT individual event pages that show only one specific event.
+
+Examples of GOOD listing pages:
+- https://meetup.com/austin-ai-group/events/ (shows multiple events)
+- https://austin-ai.org/events/ (calendar/listing page)
+- https://lu.ma/austin-tech (calendar showing multiple events)
+
+Examples of BAD single event pages (REJECT these):
+- https://austin-ai.org/event/specific-event-name/
+- https://meetup.com/group/events/123456789
+- https://lu.ma/single-event-id
+
 Evaluate this potential event source and respond with ONLY valid JSON:
 {
-  "is_event_source": boolean,      // Does this site list events (not just articles/news)?
+  "is_event_source": boolean,      // Is this a LISTING page showing multiple events (not a single event)?
   "is_austin_focused": boolean,    // Is this specific to Austin, TX area?
   "is_ai_related": boolean,        // Is this focused on AI/ML/data science/tech?
   "hosts_recurring_events": boolean, // Does it host regular/recurring events?
@@ -222,7 +235,7 @@ Scoring guidelines:
 - 0.7-0.9: Established organizations/universities with event calendars
 - 0.5-0.7: Company/community websites that occasionally host events
 - 0.3-0.5: Blogs or news sites that mention events
-- 0.0-0.3: Not an event source
+- 0.0-0.3: Not an event source OR is a single event page (not a listing)
 
 Return ONLY the JSON object, no other text.`;
 
@@ -468,6 +481,12 @@ export async function discoverSources(runStats = null) {
         continue;
       }
 
+      // Skip single event URLs - we want listing pages, not individual events
+      if (isSingleEventUrl(result.url)) {
+        console.log(`    ⏭️  Skipping single event URL: ${result.url.substring(0, 60)}...`);
+        continue;
+      }
+
       stats.urlsEvaluated++;
       console.log(`    🔎 Evaluating: ${result.url.substring(0, 60)}...`);
 
@@ -542,6 +561,23 @@ export async function discoverSources(runStats = null) {
   console.log('  ' + '─'.repeat(40) + '\n');
 
   return stats;
+}
+
+/**
+ * Check if URL is a single event page (not a listing page)
+ * We want listing pages that show multiple events, not individual event pages
+ */
+function isSingleEventUrl(url) {
+  const patterns = [
+    /\/event\/[^\/]+\/?$/,              // /event/something
+    /\/events\/[^\/]+\/?$/,             // /events/something (single event with slug)
+    /eventbrite\.com\/e\//,             // Eventbrite single event
+    /meetup\.com\/[^\/]+\/events\/\d+/, // Meetup single event
+    /lu\.ma\/[a-zA-Z0-9-]+$/,           // Lu.ma single event (but not /lu.ma/calendar/...)
+    /\/event-details\//,                // Common single event pattern
+    /\/event\?id=/,                     // Query param event ID
+  ];
+  return patterns.some(p => p.test(url));
 }
 
 /**
