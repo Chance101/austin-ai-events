@@ -18,6 +18,8 @@ export function getClient() {
 export async function validateEvent(eventData, runStats = null) {
   const anthropic = getClient();
   const today = new Date().toISOString().split('T')[0];
+  const currentYear = new Date().getFullYear();
+  const nextYear = currentYear + 1;
 
   const prompt = `You are evaluating whether a potential event is a legitimate, in-person AI/ML event in Austin, TX.
 
@@ -58,7 +60,7 @@ Other validation criteria:
 - Is this actually in Austin, TX (not virtual-only, not another city)?
 - Does it appear to be a legitimate event (not spam, not a job posting)?
 - Is the date in the future (after ${today})?
-- Events scheduled months in advance are normal for recurring meetups - do NOT reject events just because they are in 2026 or later`;
+- Events scheduled months in advance are normal for recurring meetups - do NOT reject events in ${currentYear} or ${nextYear} as "too far in the future"`;
 
   const message = await anthropic.messages.create({
     model: config.claudeModel,

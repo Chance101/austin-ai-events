@@ -92,7 +92,7 @@ export const config = {
   // Web search queries for discovering new events
   // Disabled for initial testing - enable later
   searchQueries: [
-    // 'Austin AI meetup events 2025',
+    // 'Austin AI meetup events',
     // 'Austin machine learning events',
     // 'Austin LLM workshop',
   ],
