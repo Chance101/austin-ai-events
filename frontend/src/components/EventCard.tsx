@@ -1,7 +1,9 @@
 'use client';
 
-import { format } from 'date-fns';
+import { formatInTimeZone } from 'date-fns-tz';
 import { Event } from '@/types/event';
+
+const AUSTIN_TIMEZONE = 'America/Chicago';
 
 interface EventCardProps {
   event: Event;
@@ -74,13 +76,13 @@ export default function EventCard({ event }: EventCardProps) {
         <div className="flex items-start justify-between gap-4">
           <div className="flex-shrink-0 text-center bg-gray-50 rounded-lg p-3 min-w-[70px]">
             <div className="text-sm font-medium text-gray-500 uppercase">
-              {format(startDate, 'MMM')}
+              {formatInTimeZone(startDate, AUSTIN_TIMEZONE, 'MMM')}
             </div>
             <div className="text-2xl font-bold text-gray-900">
-              {format(startDate, 'd')}
+              {formatInTimeZone(startDate, AUSTIN_TIMEZONE, 'd')}
             </div>
             <div className="text-xs text-gray-500">
-              {format(startDate, 'EEE')}
+              {formatInTimeZone(startDate, AUSTIN_TIMEZONE, 'EEE')}
             </div>
           </div>
 
@@ -90,8 +92,8 @@ export default function EventCard({ event }: EventCardProps) {
             </h3>
 
             <div className="mt-1 text-sm text-gray-600">
-              {format(startDate, 'h:mm a')}
-              {event.end_time && ` - ${format(new Date(event.end_time), 'h:mm a')}`}
+              {formatInTimeZone(startDate, AUSTIN_TIMEZONE, 'h:mm a')}
+              {event.end_time && ` - ${formatInTimeZone(new Date(event.end_time), AUSTIN_TIMEZONE, 'h:mm a')}`}
             </div>
 
             {location && (

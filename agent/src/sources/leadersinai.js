@@ -1,4 +1,7 @@
 import * as cheerio from 'cheerio';
+import { fromZonedTime } from 'date-fns-tz';
+
+const AUSTIN_TIMEZONE = 'America/Chicago';
 
 /**
  * Get the year for an upcoming February event
@@ -11,6 +14,19 @@ function getUpcomingFebruaryYear() {
 
   // If we're past February (month > 1), the next February event is next year
   return currentMonth > 1 ? currentYear + 1 : currentYear;
+}
+
+/**
+ * Create a UTC date from Austin local time
+ * @param {number} year
+ * @param {number} month - 0-indexed
+ * @param {number} day
+ * @param {number} hour - 24-hour format, defaults to 9 (9 AM)
+ */
+function createAustinDate(year, month, day, hour = 9) {
+  // Create a date string in ISO format and convert from Austin time to UTC
+  const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}T${String(hour).padStart(2, '0')}:00:00`;
+  return fromZonedTime(dateStr, AUSTIN_TIMEZONE);
 }
 
 /**
@@ -89,12 +105,13 @@ export async function scrapeLeadersInAI(sourceConfig) {
 
       if (dateMatch) {
         // Use parsed year or fall back to upcoming February year
-        const year = dateMatch[3] || getUpcomingFebruaryYear();
-        const startDay = dateMatch[1];
-        const endDay = dateMatch[2];
+        const year = parseInt(dateMatch[3]) || getUpcomingFebruaryYear();
+        const startDay = parseInt(dateMatch[1]);
+        const endDay = parseInt(dateMatch[2]);
 
-        const startDate = new Date(`February ${startDay}, ${year}`);
-        const endDate = new Date(`February ${endDay}, ${year}`);
+        // Create dates in Austin timezone (conferences typically start at 9 AM, end at 5 PM)
+        const startDate = createAustinDate(year, 1, startDay, 9);  // February = month 1
+        const endDate = createAustinDate(year, 1, endDay, 17);     // 5 PM end
 
         if (startDate >= new Date()) {
           events.push({

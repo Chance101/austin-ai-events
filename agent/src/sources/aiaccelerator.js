@@ -1,4 +1,31 @@
 import * as cheerio from 'cheerio';
+import { fromZonedTime } from 'date-fns-tz';
+
+const AUSTIN_TIMEZONE = 'America/Chicago';
+
+// Month name to 0-indexed number mapping
+const MONTH_MAP = {
+  'january': 0, 'jan': 0,
+  'february': 1, 'feb': 1,
+  'march': 2, 'mar': 2,
+  'april': 3, 'apr': 3,
+  'may': 4,
+  'june': 5, 'jun': 5,
+  'july': 6, 'jul': 6,
+  'august': 7, 'aug': 7,
+  'september': 8, 'sep': 8, 'sept': 8,
+  'october': 9, 'oct': 9,
+  'november': 10, 'nov': 10,
+  'december': 11, 'dec': 11,
+};
+
+/**
+ * Create a UTC date from Austin local time
+ */
+function createAustinDate(year, month, day, hour = 9) {
+  const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}T${String(hour).padStart(2, '0')}:00:00`;
+  return fromZonedTime(dateStr, AUSTIN_TIMEZONE);
+}
 
 /**
  * Scrape events from AI Accelerator Institute Austin page
@@ -44,12 +71,15 @@ export async function scrapeAIAccelerator(sourceConfig) {
             // Try to parse the date
             const dateMatch = dateText.match(/(\w+)\s+(\d+),?\s*(\d{4})?/);
             if (dateMatch) {
-              const month = dateMatch[1];
-              const day = dateMatch[2];
-              const year = dateMatch[3] || new Date().getFullYear();
-              const parsed = new Date(`${month} ${day}, ${year}`);
-              if (!isNaN(parsed.getTime())) {
-                startTime = parsed.toISOString();
+              const monthName = dateMatch[1].toLowerCase();
+              const day = parseInt(dateMatch[2]);
+              const year = parseInt(dateMatch[3]) || new Date().getFullYear();
+              const month = MONTH_MAP[monthName];
+
+              if (month !== undefined && day && year) {
+                // Create date in Austin timezone (conferences typically start at 9 AM)
+                const austinDate = createAustinDate(year, month, day, 9);
+                startTime = austinDate.toISOString();
               }
             }
           }
