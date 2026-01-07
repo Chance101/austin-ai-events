@@ -1,8 +1,24 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { formatInTimeZone } from 'date-fns-tz';
 import { Event } from '@/types/event';
+
+type DeviceType = 'ios' | 'android' | 'desktop';
+
+function getDeviceType(): DeviceType {
+  if (typeof navigator === 'undefined') return 'desktop';
+
+  const ua = navigator.userAgent.toLowerCase();
+
+  if (/iphone|ipad|ipod/.test(ua)) {
+    return 'ios';
+  }
+  if (/android/.test(ua)) {
+    return 'android';
+  }
+  return 'desktop';
+}
 
 const AUSTIN_TIMEZONE = 'America/Chicago';
 
@@ -40,6 +56,13 @@ export default function EventModal({ event, onClose }: EventModalProps) {
   const startDate = new Date(event.start_time);
   const location = getLocation(event);
   const fullAddress = getFullAddress(event);
+  const [showMapMenu, setShowMapMenu] = useState(false);
+  const [deviceType, setDeviceType] = useState<DeviceType>('desktop');
+
+  // Detect device type on mount
+  useEffect(() => {
+    setDeviceType(getDeviceType());
+  }, []);
 
   // Close on escape key
   useEffect(() => {
@@ -133,14 +156,63 @@ export default function EventModal({ event, onClose }: EventModalProps) {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
               </svg>
-              <a
-                href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(fullAddress)}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-blue-600 hover:text-blue-800 hover:underline"
-              >
-                {fullAddress}
-              </a>
+              <div className="relative">
+                {/* Desktop: Google Maps link */}
+                {deviceType === 'desktop' && (
+                  <a
+                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(fullAddress)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:text-blue-800 hover:underline"
+                  >
+                    {fullAddress}
+                  </a>
+                )}
+
+                {/* Android: geo: URI opens default maps app */}
+                {deviceType === 'android' && (
+                  <a
+                    href={`geo:0,0?q=${encodeURIComponent(fullAddress)}`}
+                    className="text-blue-600 hover:text-blue-800 hover:underline"
+                  >
+                    {fullAddress}
+                  </a>
+                )}
+
+                {/* iOS: Show menu to choose between Google Maps and Apple Maps */}
+                {deviceType === 'ios' && (
+                  <>
+                    <button
+                      onClick={() => setShowMapMenu(!showMapMenu)}
+                      className="text-blue-600 hover:text-blue-800 hover:underline text-left"
+                    >
+                      {fullAddress}
+                    </button>
+                    {showMapMenu && (
+                      <div className="absolute left-0 top-full mt-2 bg-white border border-gray-200 rounded-lg shadow-lg z-10 min-w-[160px]">
+                        <a
+                          href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(fullAddress)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block px-4 py-3 text-gray-700 hover:bg-gray-50 rounded-t-lg"
+                          onClick={() => setShowMapMenu(false)}
+                        >
+                          Google Maps
+                        </a>
+                        <a
+                          href={`https://maps.apple.com/?q=${encodeURIComponent(fullAddress)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block px-4 py-3 text-gray-700 hover:bg-gray-50 rounded-b-lg border-t border-gray-100"
+                          onClick={() => setShowMapMenu(false)}
+                        >
+                          Apple Maps
+                        </a>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
           )}
 
