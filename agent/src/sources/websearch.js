@@ -1,5 +1,62 @@
 import { getJson } from 'serpapi';
+import * as cheerio from 'cheerio';
 import { config } from '../config.js';
+
+/**
+ * Fetch an event page and extract full details including end_time
+ * @param {string} url - Event page URL
+ * @returns {Object|null} Enriched event data or null if extraction fails
+ */
+async function fetchEventDetails(url) {
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      },
+      signal: AbortSignal.timeout(10000), // 10 second timeout
+    });
+
+    if (!response.ok) return null;
+
+    const html = await response.text();
+    const $ = cheerio.load(html);
+
+    // Try JSON-LD structured data (most reliable)
+    let eventData = null;
+    $('script[type="application/ld+json"]').each((_, script) => {
+      try {
+        const data = JSON.parse($(script).html());
+        const items = Array.isArray(data) ? data : [data];
+
+        for (const item of items) {
+          if (item['@type'] === 'Event') {
+            eventData = {
+              title: item.name,
+              description: item.description,
+              start_time: item.startDate,
+              end_time: item.endDate || null,
+              venue_name: item.location?.name,
+              address: typeof item.location?.address === 'string'
+                ? item.location.address
+                : item.location?.address?.streetAddress,
+              image_url: item.image,
+              organizer: item.organizer?.name,
+              is_free: item.isAccessibleForFree,
+            };
+            break;
+          }
+        }
+      } catch (e) {
+        // JSON parse error, continue
+      }
+    });
+
+    return eventData;
+  } catch (error) {
+    // Timeout or fetch error
+    return null;
+  }
+}
 
 /**
  * Search for AI events in Austin using SerpAPI
@@ -29,6 +86,9 @@ export async function searchEvents(runStats = null) {
       });
       serpapiCalls++;  // Track SerpAPI call
 
+      // Collect URLs to fetch
+      const urlsToFetch = [];
+
       // Process organic results
       if (results.organic_results) {
         for (const result of results.organic_results) {
@@ -41,13 +101,12 @@ export async function searchEvents(runStats = null) {
             result.link.includes('/events');
 
           if (isEventPage) {
-            events.push({
-              title: result.title,
-              description: result.snippet,
+            urlsToFetch.push({
               url: result.link,
-              source: 'web-search',
-              source_event_id: null,
-              raw_data: result,
+              fallback: {
+                title: result.title,
+                description: result.snippet,
+              },
             });
           }
         }
@@ -56,18 +115,43 @@ export async function searchEvents(runStats = null) {
       // Process events from Google Events (if available)
       if (results.events_results) {
         for (const event of results.events_results) {
-          events.push({
-            title: event.title,
-            description: event.description,
+          urlsToFetch.push({
             url: event.link,
-            source: 'web-search',
-            source_event_id: null,
-            start_time: event.date?.start_date,
-            venue_name: event.venue?.name,
-            address: event.address?.join(', '),
-            raw_data: event,
+            fallback: {
+              title: event.title,
+              description: event.description,
+              start_time: event.date?.start_date,
+              venue_name: event.venue?.name,
+              address: event.address?.join(', '),
+            },
           });
         }
+      }
+
+      // Fetch each event page to get complete details including end_time
+      for (const item of urlsToFetch) {
+        const details = await fetchEventDetails(item.url);
+
+        if (details && details.start_time) {
+          // Use fetched details (includes end_time)
+          events.push({
+            ...details,
+            url: item.url,
+            source: 'web-search',
+            source_event_id: null,
+          });
+        } else {
+          // Fall back to search result data (no end_time)
+          events.push({
+            ...item.fallback,
+            url: item.url,
+            source: 'web-search',
+            source_event_id: null,
+          });
+        }
+
+        // Rate limit between page fetches
+        await new Promise(resolve => setTimeout(resolve, 300));
       }
 
       // Rate limiting - wait between queries
