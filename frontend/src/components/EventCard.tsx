@@ -7,6 +7,7 @@ const AUSTIN_TIMEZONE = 'America/Chicago';
 
 interface EventCardProps {
   event: Event;
+  onClick: () => void;
 }
 
 const audienceLabels: Record<string, string> = {
@@ -60,17 +61,15 @@ function getLocation(event: Event): string | null {
   return event.venue_name || event.location || event.address || null;
 }
 
-export default function EventCard({ event }: EventCardProps) {
+export default function EventCard({ event, onClick }: EventCardProps) {
   const startDate = new Date(event.start_time);
   const location = getLocation(event);
   const description = cleanDescription(event.description);
 
   return (
-    <a
-      href={event.url}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="block bg-white rounded-lg shadow-md hover:shadow-lg transition-shadow border border-gray-200 overflow-hidden"
+    <button
+      onClick={onClick}
+      className="block w-full text-left bg-white rounded-lg shadow-md hover:shadow-lg transition-shadow border border-gray-200 overflow-hidden cursor-pointer"
     >
       <div className="p-5">
         <div className="flex items-start justify-between gap-4">
@@ -146,6 +145,6 @@ export default function EventCard({ event }: EventCardProps) {
           )}
         </div>
       </div>
-    </a>
+    </button>
   );
 }

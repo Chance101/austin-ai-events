@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { Event, EventFilters as Filters } from '@/types/event';
 import EventCard from './EventCard';
 import EventFilters from './EventFilters';
+import EventModal from './EventModal';
 
 interface EventListClientProps {
   initialEvents: Event[];
@@ -16,6 +17,7 @@ export default function EventListClient({ initialEvents }: EventListClientProps)
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
+  const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
 
   // Fetch all events when "Show all" is clicked
   useEffect(() => {
@@ -123,7 +125,11 @@ export default function EventListClient({ initialEvents }: EventListClientProps)
             </p>
             <div className="grid gap-4 sm:grid-cols-1 lg:grid-cols-2">
               {filteredEvents.map((event) => (
-                <EventCard key={event.id} event={event} />
+                <EventCard
+                  key={event.id}
+                  event={event}
+                  onClick={() => setSelectedEvent(event)}
+                />
               ))}
             </div>
             {!showAll && (
@@ -149,6 +155,13 @@ export default function EventListClient({ initialEvents }: EventListClientProps)
           </div>
         )}
       </main>
+
+      {selectedEvent && (
+        <EventModal
+          event={selectedEvent}
+          onClose={() => setSelectedEvent(null)}
+        />
+      )}
     </div>
   );
 }
