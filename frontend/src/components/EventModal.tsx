@@ -54,9 +54,12 @@ export default function EventModal({ event, onClose }: EventModalProps) {
 
   // Prevent body scroll when modal is open
   useEffect(() => {
+    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
     document.body.style.overflow = 'hidden';
+    document.body.style.paddingRight = `${scrollbarWidth}px`;
     return () => {
       document.body.style.overflow = 'unset';
+      document.body.style.paddingRight = '0px';
     };
   }, []);
 
