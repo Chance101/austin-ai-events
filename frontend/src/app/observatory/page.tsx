@@ -157,26 +157,44 @@ export default function ObservatoryPage() {
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <PageTracker page="/observatory" />
       <header className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <div className="flex items-start justify-between">
-            <div>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 relative">
+          {/* Controls - absolutely positioned on desktop */}
+          <div className="hidden sm:flex flex-col items-end gap-2 absolute right-4 sm:right-6 lg:right-8 top-6">
+            <ThemeToggle />
+            <Link
+              href="/"
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+              </svg>
+              Back to Calendar
+            </Link>
+          </div>
+          {/* Title and subtitle */}
+          <div>
+            <div className="flex items-center justify-between sm:block">
               <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">
                 Observatory
               </h1>
-              <p className="mt-1 text-gray-600 dark:text-gray-300">
+              {/* Mobile only: toggle */}
+              <div className="sm:hidden">
+                <ThemeToggle />
+              </div>
+            </div>
+            <div className="flex items-center justify-between gap-4 mt-1">
+              <p className="text-gray-600 dark:text-gray-300">
                 Watch the AI agent discover and curate Austin AI events
               </p>
-            </div>
-            <div className="flex items-center gap-3">
-              <ThemeToggle />
+              {/* Mobile only: Back to Calendar button */}
               <Link
                 href="/"
-                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors"
+                className="sm:hidden shrink-0 inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
                 </svg>
-                Back to Calendar
+                Calendar
               </Link>
             </div>
           </div>
