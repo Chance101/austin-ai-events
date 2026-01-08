@@ -73,7 +73,7 @@ export default function LearningActivity({
           <span className="text-lg">🔬</span>
           <h3 className="text-lg font-semibold text-gray-900">Exploration Queue</h3>
         </div>
-        <p className="text-sm text-gray-500 mb-4">New strategies awaiting testing</p>
+        <p className="text-sm text-gray-500 mb-4">New agent-suggested strategies awaiting testing</p>
 
         {explorationQueue.length === 0 ? (
           <p className="text-gray-500 text-sm">No queries in queue.</p>
@@ -142,7 +142,7 @@ export default function LearningActivity({
           <span className="text-lg">🔬</span>
           <h3 className="text-lg font-semibold text-gray-900">Exploration Queue</h3>
         </div>
-        <p className="text-sm text-gray-500 mb-4">New strategies awaiting testing</p>
+        <p className="text-sm text-gray-500 mb-4">New agent-suggested strategies awaiting testing</p>
 
         {explorationQueue.length === 0 ? (
           <p className="text-gray-500 text-sm">No queries in queue.</p>
