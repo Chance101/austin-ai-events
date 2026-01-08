@@ -10,7 +10,7 @@ export const config = {
   supabaseServiceKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
 
   // Claude model for reasoning
-  claudeModel: 'claude-sonnet-4-20250514',
+  claudeModel: 'claude-sonnet-4-5',
 
   // Known Austin AI community sources
   sources: [
