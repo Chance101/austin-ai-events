@@ -42,10 +42,6 @@ const levelColors: Record<string, string> = {
   'all-levels': 'bg-blue-100 text-blue-800',
 };
 
-function getLocation(event: Event): string | null {
-  return event.venue_name || event.location || event.address || null;
-}
-
 function getFullAddress(event: Event): string | null {
   const parts = [event.venue_name, event.address, event.location].filter(Boolean);
   const unique = [...new Set(parts)];
@@ -54,15 +50,9 @@ function getFullAddress(event: Event): string | null {
 
 export default function EventModal({ event, onClose }: EventModalProps) {
   const startDate = new Date(event.start_time);
-  const location = getLocation(event);
   const fullAddress = getFullAddress(event);
   const [showMapMenu, setShowMapMenu] = useState(false);
-  const [deviceType, setDeviceType] = useState<DeviceType>('desktop');
-
-  // Detect device type on mount
-  useEffect(() => {
-    setDeviceType(getDeviceType());
-  }, []);
+  const [deviceType] = useState<DeviceType>(() => getDeviceType());
 
   // Close on escape key
   useEffect(() => {

@@ -37,7 +37,7 @@ export default function LearningActivity({
           <span className="text-lg">🏆</span>
           <h3 className="text-lg font-semibold text-gray-900">Top Performing Queries</h3>
         </div>
-        <p className="text-sm text-gray-500 mb-4">The agent's most successful searches</p>
+        <p className="text-sm text-gray-500 mb-4">The agent&apos;s most successful searches</p>
 
         {topPerformers.length === 0 ? (
           <p className="text-gray-500 text-sm">No successful queries yet.</p>
@@ -110,7 +110,7 @@ export default function LearningActivity({
           <span className="text-lg">🏆</span>
           <h3 className="text-lg font-semibold text-gray-900">Top Performing Queries</h3>
         </div>
-        <p className="text-sm text-gray-500 mb-4">The agent's most successful searches</p>
+        <p className="text-sm text-gray-500 mb-4">The agent&apos;s most successful searches</p>
 
         {topPerformers.length === 0 ? (
           <p className="text-gray-500 text-sm">No successful queries yet.</p>
