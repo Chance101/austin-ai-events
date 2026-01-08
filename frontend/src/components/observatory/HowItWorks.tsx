@@ -31,10 +31,7 @@ const steps = [
 export default function HowItWorks() {
   return (
     <div className="bg-white rounded-lg shadow-md border border-gray-200 p-6">
-      <h3 className="text-lg font-semibold text-gray-900 mb-2">How It Works</h3>
-      <p className="text-sm text-gray-600 mb-6">
-        This calendar is maintained by an AI agent that discovers and curates events automatically.
-      </p>
+      <h3 className="text-lg font-semibold text-gray-900 mb-6">How It Works</h3>
 
       {/* Desktop: Horizontal flow */}
       <div className="hidden md:block">
@@ -63,19 +60,19 @@ export default function HowItWorks() {
           <svg className="w-full h-10" viewBox="-100 0 1000 40" preserveAspectRatio="xMidYMid meet">
             <defs>
               <marker id="arrowhead" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
-                <path d="M0,1 L0,7 L6,4 Z" fill="#d1d5db" />
+                <path d="M0,1 L0,7 L6,4 Z" fill="#60a5fa" />
               </marker>
             </defs>
             <path
               d="M 880 5 L 880 25 Q 880 35, 870 35 L -70 35 Q -80 35, -80 25 L -80 5"
               fill="none"
-              stroke="#d1d5db"
+              stroke="#60a5fa"
               strokeWidth="3"
               strokeLinecap="round"
               markerEnd="url(#arrowhead)"
             />
           </svg>
-          <span className="absolute left-1/2 -translate-x-1/2 bottom-0 text-sm text-gray-400 bg-white px-2">
+          <span className="absolute left-1/2 -translate-x-1/2 bottom-0 text-sm font-medium text-blue-500 bg-white px-3 py-0.5 rounded-full border border-blue-200">
             ongoing learning loop
           </span>
         </div>
@@ -104,12 +101,25 @@ export default function HowItWorks() {
           </div>
         ))}
         {/* Repeats indicator */}
-        <div className="flex items-center justify-center gap-2 pt-2 text-gray-400">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-          </svg>
-          <span className="text-xs">ongoing learning loop</span>
+        <div className="flex items-center justify-center gap-2 pt-2">
+          <span className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-500 bg-white px-3 py-0.5 rounded-full border border-blue-200">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            ongoing learning loop
+          </span>
         </div>
+      </div>
+
+      {/* The Bigger Picture */}
+      <div className="mt-6 pt-6 border-t border-gray-200">
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-lg">💡</span>
+          <h4 className="text-md font-semibold text-gray-900">The Bigger Picture</h4>
+        </div>
+        <p className="text-sm text-gray-600">
+          The agent is meant to be a self-improving system. It runs daily, learns from its successes and failures, and continuously expands its knowledge of Austin&apos;s AI community, all with minimal human intervention. The Observatory exists to give transparency into this process so people can see the agent isn&apos;t a black box.
+        </p>
       </div>
     </div>
   );
