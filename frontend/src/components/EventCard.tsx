@@ -19,10 +19,10 @@ const audienceLabels: Record<string, string> = {
 };
 
 const levelColors: Record<string, string> = {
-  beginner: 'bg-green-100 text-green-800',
-  intermediate: 'bg-yellow-100 text-yellow-800',
-  advanced: 'bg-red-100 text-red-800',
-  'all-levels': 'bg-blue-100 text-blue-800',
+  beginner: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
+  intermediate: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200',
+  advanced: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
+  'all-levels': 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
 };
 
 /**
@@ -69,34 +69,34 @@ export default function EventCard({ event, onClick }: EventCardProps) {
   return (
     <button
       onClick={onClick}
-      className="block w-full text-left bg-white rounded-lg shadow-md hover:shadow-lg transition-shadow border border-gray-200 overflow-hidden cursor-pointer"
+      className="block w-full text-left bg-white dark:bg-gray-800 rounded-lg shadow-md hover:shadow-lg transition-shadow border border-gray-200 dark:border-gray-700 overflow-hidden cursor-pointer"
     >
       <div className="p-5">
         <div className="flex items-start justify-between gap-4">
-          <div className="flex-shrink-0 text-center bg-gray-50 rounded-lg p-3 min-w-[70px]">
-            <div className="text-sm font-medium text-gray-500 uppercase">
+          <div className="flex-shrink-0 text-center bg-gray-50 dark:bg-gray-700 rounded-lg p-3 min-w-[70px]">
+            <div className="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase">
               {formatInTimeZone(startDate, AUSTIN_TIMEZONE, 'MMM')}
             </div>
-            <div className="text-2xl font-bold text-gray-900">
+            <div className="text-2xl font-bold text-gray-900 dark:text-white">
               {formatInTimeZone(startDate, AUSTIN_TIMEZONE, 'd')}
             </div>
-            <div className="text-xs text-gray-500">
+            <div className="text-xs text-gray-500 dark:text-gray-400">
               {formatInTimeZone(startDate, AUSTIN_TIMEZONE, 'EEE')}
             </div>
           </div>
 
           <div className="flex-1 min-w-0">
-            <h3 className="text-lg font-semibold text-gray-900 leading-tight">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white leading-tight">
               {event.title}
             </h3>
 
-            <div className="mt-1 text-sm text-gray-600">
+            <div className="mt-1 text-sm text-gray-600 dark:text-gray-300">
               {formatInTimeZone(startDate, AUSTIN_TIMEZONE, 'h:mm a')}
               {event.end_time && ` - ${formatInTimeZone(new Date(event.end_time), AUSTIN_TIMEZONE, 'h:mm a')}`}
             </div>
 
             {location && (
-              <div className="mt-1 text-sm text-gray-500 flex items-start gap-1">
+              <div className="mt-1 text-sm text-gray-500 dark:text-gray-400 flex items-start gap-1">
                 <svg className="w-4 h-4 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -106,7 +106,7 @@ export default function EventCard({ event, onClick }: EventCardProps) {
             )}
 
             {event.organizer && (
-              <div className="mt-1 text-sm text-gray-500">
+              <div className="mt-1 text-sm text-gray-500 dark:text-gray-400">
                 by {event.organizer}
               </div>
             )}
@@ -114,7 +114,7 @@ export default function EventCard({ event, onClick }: EventCardProps) {
         </div>
 
         {description && (
-          <p className="mt-3 text-sm text-gray-600 line-clamp-2">
+          <p className="mt-3 text-sm text-gray-600 dark:text-gray-300 line-clamp-2">
             {description}
           </p>
         )}
@@ -127,19 +127,19 @@ export default function EventCard({ event, onClick }: EventCardProps) {
           {event.audience_type.slice(0, 2).map((audience) => (
             <span
               key={audience}
-              className="px-2 py-1 text-xs font-medium rounded bg-gray-100 text-gray-700"
+              className="px-2 py-1 text-xs font-medium rounded bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200"
             >
               {audienceLabels[audience] || audience}
             </span>
           ))}
 
           {event.is_free === true && (
-            <span className="px-2 py-1 text-xs font-medium rounded bg-emerald-100 text-emerald-800">
+            <span className="px-2 py-1 text-xs font-medium rounded bg-emerald-100 dark:bg-emerald-900 text-emerald-800 dark:text-emerald-200">
               Free
             </span>
           )}
           {event.is_free === false && (
-            <span className="px-2 py-1 text-xs font-medium rounded bg-amber-100 text-amber-800">
+            <span className="px-2 py-1 text-xs font-medium rounded bg-amber-100 dark:bg-amber-900 text-amber-800 dark:text-amber-200">
               Paid
             </span>
           )}

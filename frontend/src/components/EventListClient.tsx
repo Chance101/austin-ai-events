@@ -107,19 +107,19 @@ export default function EventListClient({ initialEvents }: EventListClientProps)
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
           </div>
         ) : error ? (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700">
+          <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4 text-red-700 dark:text-red-400">
             {error}
           </div>
         ) : filteredEvents.length === 0 ? (
-          <div className="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center">
-            <p className="text-gray-600">No upcoming events found.</p>
-            <p className="text-sm text-gray-500 mt-2">
+          <div className="bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-8 text-center">
+            <p className="text-gray-600 dark:text-gray-300">No upcoming events found.</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
               Try adjusting your filters or check back later.
             </p>
           </div>
         ) : (
           <div className="space-y-4">
-            <p className="text-sm text-gray-600">
+            <p className="text-sm text-gray-600 dark:text-gray-400">
               {filteredEvents.length} upcoming event{filteredEvents.length !== 1 ? 's' : ''}
               {!showAll && ' in the next 30 days'}
             </p>
@@ -136,7 +136,7 @@ export default function EventListClient({ initialEvents }: EventListClientProps)
               <div className="text-center pt-4">
                 <button
                   onClick={handleShowAll}
-                  className="px-6 py-2 text-sm font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
+                  className="px-6 py-2 text-sm font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 rounded-lg transition-colors"
                 >
                   Show all upcoming events
                 </button>
@@ -146,7 +146,7 @@ export default function EventListClient({ initialEvents }: EventListClientProps)
               <div className="text-center pt-4">
                 <button
                   onClick={handleShowLess}
-                  className="px-6 py-2 text-sm font-medium text-gray-600 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors"
+                  className="px-6 py-2 text-sm font-medium text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
                 >
                   Show next 30 days only
                 </button>

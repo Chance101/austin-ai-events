@@ -36,10 +36,10 @@ const audienceLabels: Record<string, string> = {
 };
 
 const levelColors: Record<string, string> = {
-  beginner: 'bg-green-100 text-green-800',
-  intermediate: 'bg-yellow-100 text-yellow-800',
-  advanced: 'bg-red-100 text-red-800',
-  'all-levels': 'bg-blue-100 text-blue-800',
+  beginner: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
+  intermediate: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200',
+  advanced: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
+  'all-levels': 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
 };
 
 function getFullAddress(event: Event): string | null {
@@ -82,29 +82,29 @@ export default function EventModal({ event, onClose }: EventModalProps) {
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+        className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-start justify-between gap-4">
+        <div className="sticky top-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex items-start justify-between gap-4">
           <div className="flex items-start gap-4">
-            <div className="flex-shrink-0 text-center bg-blue-50 rounded-lg p-3 min-w-[70px]">
-              <div className="text-sm font-medium text-blue-600 uppercase">
+            <div className="flex-shrink-0 text-center bg-blue-50 dark:bg-blue-900/30 rounded-lg p-3 min-w-[70px]">
+              <div className="text-sm font-medium text-blue-600 dark:text-blue-400 uppercase">
                 {formatInTimeZone(startDate, AUSTIN_TIMEZONE, 'MMM')}
               </div>
-              <div className="text-2xl font-bold text-blue-700">
+              <div className="text-2xl font-bold text-blue-700 dark:text-blue-300">
                 {formatInTimeZone(startDate, AUSTIN_TIMEZONE, 'd')}
               </div>
-              <div className="text-xs text-blue-500">
+              <div className="text-xs text-blue-500 dark:text-blue-400">
                 {formatInTimeZone(startDate, AUSTIN_TIMEZONE, 'EEE')}
               </div>
             </div>
             <div>
-              <h2 className="text-xl font-bold text-gray-900">
+              <h2 className="text-xl font-bold text-gray-900 dark:text-white">
                 {event.title}
               </h2>
               {event.organizer && (
-                <p className="text-sm text-gray-500 mt-1">
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                   by {event.organizer}
                 </p>
               )}
@@ -112,7 +112,7 @@ export default function EventModal({ event, onClose }: EventModalProps) {
           </div>
           <button
             onClick={onClose}
-            className="flex-shrink-0 p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+            className="flex-shrink-0 p-2 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
             aria-label="Close modal"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -125,14 +125,14 @@ export default function EventModal({ event, onClose }: EventModalProps) {
         <div className="px-6 py-5 space-y-5">
           {/* Date & Time */}
           <div className="flex items-start gap-3">
-            <svg className="w-5 h-5 text-gray-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-5 h-5 text-gray-400 dark:text-gray-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             <div>
-              <p className="font-medium text-gray-900">
+              <p className="font-medium text-gray-900 dark:text-white">
                 {formatInTimeZone(startDate, AUSTIN_TIMEZONE, 'EEEE, MMMM d, yyyy')}
               </p>
-              <p className="text-gray-600">
+              <p className="text-gray-600 dark:text-gray-300">
                 {formatInTimeZone(startDate, AUSTIN_TIMEZONE, 'h:mm a')}
                 {event.end_time && ` - ${formatInTimeZone(new Date(event.end_time), AUSTIN_TIMEZONE, 'h:mm a')}`}
               </p>
@@ -142,7 +142,7 @@ export default function EventModal({ event, onClose }: EventModalProps) {
           {/* Location */}
           {fullAddress && (
             <div className="flex items-start gap-3">
-              <svg className="w-5 h-5 text-gray-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-5 h-5 text-gray-400 dark:text-gray-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
               </svg>
@@ -153,7 +153,7 @@ export default function EventModal({ event, onClose }: EventModalProps) {
                     href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(fullAddress)}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-blue-600 hover:text-blue-800 hover:underline"
+                    className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 hover:underline"
                   >
                     {fullAddress}
                   </a>
@@ -163,7 +163,7 @@ export default function EventModal({ event, onClose }: EventModalProps) {
                 {deviceType === 'android' && (
                   <a
                     href={`geo:0,0?q=${encodeURIComponent(fullAddress)}`}
-                    className="text-blue-600 hover:text-blue-800 hover:underline"
+                    className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 hover:underline"
                   >
                     {fullAddress}
                   </a>
@@ -174,17 +174,17 @@ export default function EventModal({ event, onClose }: EventModalProps) {
                   <>
                     <button
                       onClick={() => setShowMapMenu(!showMapMenu)}
-                      className="text-blue-600 hover:text-blue-800 hover:underline text-left"
+                      className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 hover:underline text-left"
                     >
                       {fullAddress}
                     </button>
                     {showMapMenu && (
-                      <div className="absolute left-0 top-full mt-2 bg-white border border-gray-200 rounded-lg shadow-lg z-10 min-w-[160px]">
+                      <div className="absolute left-0 top-full mt-2 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg shadow-lg z-10 min-w-[160px]">
                         <a
                           href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(fullAddress)}`}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="block px-4 py-3 text-gray-700 hover:bg-gray-50 rounded-t-lg"
+                          className="block px-4 py-3 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-600 rounded-t-lg"
                           onClick={() => setShowMapMenu(false)}
                         >
                           Google Maps
@@ -193,7 +193,7 @@ export default function EventModal({ event, onClose }: EventModalProps) {
                           href={`https://maps.apple.com/?q=${encodeURIComponent(fullAddress)}`}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="block px-4 py-3 text-gray-700 hover:bg-gray-50 rounded-b-lg border-t border-gray-100"
+                          className="block px-4 py-3 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-600 rounded-b-lg border-t border-gray-100 dark:border-gray-600"
                           onClick={() => setShowMapMenu(false)}
                         >
                           Apple Maps
@@ -215,19 +215,19 @@ export default function EventModal({ event, onClose }: EventModalProps) {
             {event.audience_type.map((audience) => (
               <span
                 key={audience}
-                className="px-3 py-1 text-sm font-medium rounded-full bg-gray-100 text-gray-700"
+                className="px-3 py-1 text-sm font-medium rounded-full bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200"
               >
                 {audienceLabels[audience] || audience}
               </span>
             ))}
 
             {event.is_free === true && (
-              <span className="px-3 py-1 text-sm font-medium rounded-full bg-emerald-100 text-emerald-800">
+              <span className="px-3 py-1 text-sm font-medium rounded-full bg-emerald-100 dark:bg-emerald-900 text-emerald-800 dark:text-emerald-200">
                 Free
               </span>
             )}
             {event.is_free === false && (
-              <span className="px-3 py-1 text-sm font-medium rounded-full bg-amber-100 text-amber-800">
+              <span className="px-3 py-1 text-sm font-medium rounded-full bg-amber-100 dark:bg-amber-900 text-amber-800 dark:text-amber-200">
                 {event.price || 'Paid'}
               </span>
             )}
@@ -236,10 +236,10 @@ export default function EventModal({ event, onClose }: EventModalProps) {
           {/* Description */}
           {event.description && (
             <div className="pt-2">
-              <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wide mb-2">
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-white uppercase tracking-wide mb-2">
                 About This Event
               </h3>
-              <div className="text-gray-700 whitespace-pre-wrap leading-relaxed">
+              <div className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap leading-relaxed">
                 {event.description}
               </div>
             </div>
@@ -247,7 +247,7 @@ export default function EventModal({ event, onClose }: EventModalProps) {
         </div>
 
         {/* Footer with CTA */}
-        <div className="sticky bottom-0 bg-gray-50 border-t border-gray-200 px-6 py-4">
+        <div className="sticky bottom-0 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 px-6 py-4">
           <a
             href={event.url}
             target="_blank"

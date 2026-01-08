@@ -56,13 +56,13 @@ export default function EventFilters({ filters, onFilterChange }: EventFiltersPr
     filters.isFree !== undefined;
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold text-gray-900">Filters</h2>
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Filters</h2>
         {hasActiveFilters && (
           <button
             onClick={clearFilters}
-            className="text-sm text-blue-600 hover:text-blue-800"
+            className="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300"
           >
             Clear all
           </button>
@@ -71,7 +71,7 @@ export default function EventFilters({ filters, onFilterChange }: EventFiltersPr
 
       <div className="space-y-4">
         <div>
-          <h3 className="text-sm font-medium text-gray-700 mb-2">Audience</h3>
+          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Audience</h3>
           <div className="flex flex-wrap gap-2">
             {audienceOptions.map((option) => (
               <button
@@ -80,7 +80,7 @@ export default function EventFilters({ filters, onFilterChange }: EventFiltersPr
                 className={`px-3 py-1 text-sm rounded-full border transition-colors ${
                   filters.audience?.includes(option.value)
                     ? 'bg-blue-600 text-white border-blue-600'
-                    : 'bg-white text-gray-700 border-gray-300 hover:border-blue-400'
+                    : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 hover:border-blue-400 dark:hover:border-blue-500'
                 }`}
               >
                 {option.label}
@@ -90,7 +90,7 @@ export default function EventFilters({ filters, onFilterChange }: EventFiltersPr
         </div>
 
         <div>
-          <h3 className="text-sm font-medium text-gray-700 mb-2">Technical Level</h3>
+          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Technical Level</h3>
           <div className="flex flex-wrap gap-2">
             {levelOptions.map((option) => (
               <button
@@ -99,7 +99,7 @@ export default function EventFilters({ filters, onFilterChange }: EventFiltersPr
                 className={`px-3 py-1 text-sm rounded-full border transition-colors ${
                   filters.technicalLevel?.includes(option.value)
                     ? 'bg-blue-600 text-white border-blue-600'
-                    : 'bg-white text-gray-700 border-gray-300 hover:border-blue-400'
+                    : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 hover:border-blue-400 dark:hover:border-blue-500'
                 }`}
               >
                 {option.label}
@@ -114,7 +114,7 @@ export default function EventFilters({ filters, onFilterChange }: EventFiltersPr
             className={`px-3 py-1 text-sm rounded-full border transition-colors ${
               filters.isFree
                 ? 'bg-emerald-600 text-white border-emerald-600'
-                : 'bg-white text-gray-700 border-gray-300 hover:border-emerald-400'
+                : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 hover:border-emerald-400 dark:hover:border-emerald-500'
             }`}
           >
             Free Events Only

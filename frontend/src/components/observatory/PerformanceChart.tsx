@@ -28,9 +28,9 @@ export default function PerformanceChart({ data, loading }: PerformanceChartProp
 
   if (loading) {
     return (
-      <div className="bg-white rounded-lg shadow-md border border-gray-200 p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Events Added (Last 30 Days)</h3>
-        <div className="h-64 bg-gray-100 rounded animate-pulse"></div>
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 p-6">
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Events Added (Last 30 Days)</h3>
+        <div className="h-64 bg-gray-100 dark:bg-gray-700 rounded animate-pulse"></div>
       </div>
     );
   }
@@ -39,20 +39,20 @@ export default function PerformanceChart({ data, loading }: PerformanceChartProp
   const avgPerDay = data.length > 0 ? (totalEvents / data.length).toFixed(1) : '0';
 
   return (
-    <div className="bg-white rounded-lg shadow-md border border-gray-200 p-6 h-full flex flex-col">
+    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 p-6 h-full flex flex-col">
       <div className="flex items-start justify-between mb-4">
         <div>
-          <h3 className="text-lg font-semibold text-gray-900">Events Added (Last 30 Days)</h3>
-          <p className="text-sm text-gray-500">Daily event additions from agent runs</p>
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Events Added (Last 30 Days)</h3>
+          <p className="text-sm text-gray-500 dark:text-gray-400">Daily event additions from agent runs</p>
         </div>
         <div className="text-right">
-          <p className="text-2xl font-bold text-blue-600">{totalEvents}</p>
-          <p className="text-xs text-gray-500">{avgPerDay}/day avg</p>
+          <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{totalEvents}</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">{avgPerDay}/day avg</p>
         </div>
       </div>
 
       {data.length === 0 ? (
-        <div className="flex-1 flex items-center justify-center text-gray-500">
+        <div className="flex-1 flex items-center justify-center text-gray-500 dark:text-gray-400">
           No data available yet
         </div>
       ) : (
@@ -65,25 +65,26 @@ export default function PerformanceChart({ data, loading }: PerformanceChartProp
                   <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+              <CartesianGrid strokeDasharray="3 3" className="stroke-gray-200 dark:stroke-gray-700" />
               <XAxis
                 dataKey="dateLabel"
-                tick={{ fontSize: 12, fill: '#6b7280' }}
+                tick={{ fontSize: 12 }}
                 tickLine={false}
-                axisLine={{ stroke: '#e5e7eb' }}
+                className="text-gray-500 dark:text-gray-400"
               />
               <YAxis
-                tick={{ fontSize: 12, fill: '#6b7280' }}
+                tick={{ fontSize: 12 }}
                 tickLine={false}
-                axisLine={{ stroke: '#e5e7eb' }}
                 allowDecimals={false}
+                className="text-gray-500 dark:text-gray-400"
               />
               <Tooltip
                 contentStyle={{
-                  backgroundColor: '#fff',
-                  border: '1px solid #e5e7eb',
+                  backgroundColor: 'var(--background)',
+                  border: '1px solid var(--foreground)',
                   borderRadius: '8px',
                   fontSize: '12px',
+                  color: 'var(--foreground)',
                 }}
                 formatter={(value) => [`${value ?? 0} events`, 'Added']}
                 labelFormatter={(label) => label}
