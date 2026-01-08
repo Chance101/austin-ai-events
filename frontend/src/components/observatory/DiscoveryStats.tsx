@@ -37,7 +37,7 @@ export default function DiscoveryStats({
   }
 
   return (
-    <div className="bg-white rounded-lg shadow-md border border-gray-200 p-6">
+    <div className="bg-white rounded-lg shadow-md border border-gray-200 p-6 h-full flex flex-col">
       <h3 className="text-lg font-semibold text-gray-900 mb-4">Discovery Stats</h3>
 
       <div className="grid grid-cols-2 gap-4 mb-6">
@@ -51,7 +51,10 @@ export default function DiscoveryStats({
         </div>
       </div>
 
-      <h4 className="text-sm font-medium text-gray-700 mb-3">Recently Discovered</h4>
+      <div className="flex items-center justify-between mb-3">
+        <h4 className="text-sm font-medium text-gray-700">Recently Discovered</h4>
+        <span className="text-sm font-medium text-gray-700">Confidence</span>
+      </div>
 
       {recentSources.length === 0 ? (
         <p className="text-gray-500 text-sm">No sources discovered yet.</p>

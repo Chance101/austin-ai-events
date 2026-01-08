@@ -42,7 +42,7 @@ const sourceLabels: Record<string, string> = {
 export default function ActivityFeed({ events, loading }: ActivityFeedProps) {
   if (loading) {
     return (
-      <div className="bg-white rounded-lg shadow-md border border-gray-200 p-6">
+      <div className="bg-white rounded-lg shadow-md border border-gray-200 p-6 h-full flex flex-col">
         <h3 className="text-lg font-semibold text-gray-900 mb-4">Recent Activity</h3>
         <div className="space-y-4">
           {[...Array(5)].map((_, i) => (
@@ -57,7 +57,7 @@ export default function ActivityFeed({ events, loading }: ActivityFeedProps) {
   }
 
   return (
-    <div className="bg-white rounded-lg shadow-md border border-gray-200 p-6">
+    <div className="bg-white rounded-lg shadow-md border border-gray-200 p-6 h-full flex flex-col">
       <h3 className="text-lg font-semibold text-gray-900 mb-4">Recent Activity</h3>
       <p className="text-sm text-gray-500 mb-4">Latest events added by the agent</p>
 

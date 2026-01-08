@@ -23,7 +23,8 @@ export default function ObservatoryPage() {
   const [totalSources, setTotalSources] = useState(0);
   const [recentSources, setRecentSources] = useState<Source[]>([]);
   const [sourcesThisWeek, setSourcesThisWeek] = useState(0);
-  const [agentQueries, setAgentQueries] = useState<SearchQuery[]>([]);
+  const [topPerformingQueries, setTopPerformingQueries] = useState<SearchQuery[]>([]);
+  const [explorationQueries, setExplorationQueries] = useState<SearchQuery[]>([]);
   const [dailyStats, setDailyStats] = useState<DailyStats[]>([]);
   const [totalRuns, setTotalRuns] = useState(0);
   const [successfulRuns, setSuccessfulRuns] = useState(0);
@@ -70,7 +71,7 @@ export default function ObservatoryPage() {
         .from('sources')
         .select('*')
         .order('created_at', { ascending: false })
-        .limit(5);
+        .limit(7);
       setRecentSources(recentSourcesData || []);
 
       // Fetch sources from this week
@@ -81,14 +82,25 @@ export default function ObservatoryPage() {
         .gte('created_at', weekAgo);
       setSourcesThisWeek(weekSourcesCount || 0);
 
-      // Fetch agent-generated queries
-      const { data: queriesData } = await supabase
+      // Fetch top performing agent-generated queries (those that found sources)
+      const { data: topQueriesData } = await supabase
         .from('search_queries')
         .select('*')
         .eq('created_by', 'agent')
+        .gt('sources_found', 0)
+        .order('sources_found', { ascending: false })
+        .limit(5);
+      setTopPerformingQueries(topQueriesData || []);
+
+      // Fetch exploration queue (new queries that haven't been run yet)
+      const { data: explorationData } = await supabase
+        .from('search_queries')
+        .select('*')
+        .eq('created_by', 'agent')
+        .eq('times_run', 0)
         .order('created_at', { ascending: false })
         .limit(5);
-      setAgentQueries(queriesData || []);
+      setExplorationQueries(explorationData || []);
 
       // Fetch daily stats for last 30 days
       const thirtyDaysAgo = subDays(new Date(), 30).toISOString();
@@ -198,20 +210,39 @@ export default function ObservatoryPage() {
           </div>
         </div>
 
-        {/* Second Row - Activity Feed + Discovery/Learning */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          <div className="lg:col-span-2">
-            <ActivityFeed events={recentEvents} loading={loading} />
+        {/* Second Row - Activity Feed + Discovery Stats (same height) */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
+          <div className="lg:col-span-2 flex">
+            <div className="flex-1 flex flex-col">
+              <ActivityFeed events={recentEvents} loading={loading} />
+            </div>
           </div>
-          <div className="space-y-8">
-            <DiscoveryStats
-              totalSources={totalSources}
-              recentSources={recentSources}
-              sourcesThisWeek={sourcesThisWeek}
-              loading={loading}
-            />
-            <LearningActivity queries={agentQueries} loading={loading} />
+          <div className="flex">
+            <div className="flex-1 flex flex-col">
+              <DiscoveryStats
+                totalSources={totalSources}
+                recentSources={recentSources}
+                sourcesThisWeek={sourcesThisWeek}
+                loading={loading}
+              />
+            </div>
           </div>
+        </div>
+
+        {/* Third Row - Top Performing Queries + Exploration Queue */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          <LearningActivity
+            topPerformers={topPerformingQueries}
+            explorationQueue={explorationQueries}
+            loading={loading}
+            section="top-performers"
+          />
+          <LearningActivity
+            topPerformers={topPerformingQueries}
+            explorationQueue={explorationQueries}
+            loading={loading}
+            section="exploration"
+          />
         </div>
 
         {/* Visitor Counter */}
