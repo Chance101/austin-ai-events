@@ -122,7 +122,7 @@ export default async function Home() {
       <footer className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 mt-auto">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <p className="text-sm text-gray-600 dark:text-gray-400">
-            This calendar runs itself. An autonomous AI agent running Claude Opus 4.5 discovers, validates, and curates Austin&apos;s AI events daily—no humans required. Built with Claude Code.
+            This calendar runs itself. An autonomous AI agent running Claude Sonnet 4.5 discovers, validates, and curates Austin&apos;s AI events daily—no humans required. Built with Claude Code.
           </p>
         </div>
       </footer>
