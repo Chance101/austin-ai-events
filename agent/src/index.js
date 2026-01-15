@@ -7,7 +7,7 @@ import { scrapeAustinForum } from './sources/austinforum.js';
 import { scrapeAIAccelerator } from './sources/aiaccelerator.js';
 import { scrapeAustinAI } from './sources/austinai.js';
 import { scrapeLeadersInAI } from './sources/leadersinai.js';
-import { validateEvent, classifyEvent } from './utils/claude.js';
+import { validateEvent, classifyEvent, extractLocationFromImage } from './utils/claude.js';
 import { findDuplicates, getEventHash } from './utils/dedup.js';
 import { upsertEvent, getExistingEvents, logAgentRun } from './utils/supabase.js';
 import { discoverSources, getTrustedSources, updateSourceStats } from './discovery/sourceDiscovery.js';
@@ -240,6 +240,23 @@ async function discoverEvents() {
         console.log(`  ⏭️  Skipping (URL match): ${event.title?.substring(0, 50)}...`);
         runStats.duplicatesSkipped++;
         continue;
+      }
+
+      // If no venue/address but has image, try to extract location from image
+      if (!event.venue_name && !event.address && event.image_url) {
+        console.log(`    📷 No venue data - analyzing event image...`);
+        const imageLocation = await extractLocationFromImage(event.image_url);
+        runStats.claudeApiCalls++;
+
+        if (imageLocation && imageLocation.found) {
+          // Add extracted location to event data
+          if (imageLocation.venue) event.venue_name = imageLocation.venue;
+          if (imageLocation.city) {
+            const cityState = [imageLocation.city, imageLocation.state].filter(Boolean).join(', ');
+            event.address = imageLocation.address || cityState;
+          }
+          console.log(`    📷 Found location in image: ${event.address || event.venue_name}`);
+        }
       }
 
       // Validate with Claude

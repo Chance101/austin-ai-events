@@ -11,6 +11,91 @@ export function getClient() {
 }
 
 /**
+ * Extract location information from an event image using Claude's vision
+ * This is used as a fallback when structured venue/address data is missing
+ * @param {string} imageUrl - URL of the event image to analyze
+ * @returns {Object} Location info extracted from image, or null if not found
+ */
+export async function extractLocationFromImage(imageUrl) {
+  if (!imageUrl) return null;
+
+  const anthropic = getClient();
+
+  try {
+    // Fetch the image and convert to base64
+    const response = await fetch(imageUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+      },
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (!response.ok) {
+      console.log(`    Could not fetch image: ${response.status}`);
+      return null;
+    }
+
+    const contentType = response.headers.get('content-type') || 'image/jpeg';
+    const arrayBuffer = await response.arrayBuffer();
+    const base64 = Buffer.from(arrayBuffer).toString('base64');
+
+    // Determine media type
+    let mediaType = 'image/jpeg';
+    if (contentType.includes('png')) mediaType = 'image/png';
+    else if (contentType.includes('gif')) mediaType = 'image/gif';
+    else if (contentType.includes('webp')) mediaType = 'image/webp';
+
+    const message = await anthropic.messages.create({
+      model: config.claudeModel,
+      max_tokens: 300,
+      messages: [{
+        role: 'user',
+        content: [
+          {
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: mediaType,
+              data: base64,
+            },
+          },
+          {
+            type: 'text',
+            text: `Look at this event promotional image/banner. Extract any location information visible in the image.
+
+Respond with JSON only:
+{
+  "city": string | null,      // City name if visible (e.g., "Austin", "San Antonio", "Killeen")
+  "state": string | null,     // State if visible (e.g., "TX", "Texas")
+  "venue": string | null,     // Venue name if visible
+  "address": string | null,   // Street address if visible
+  "found": boolean            // true if any location info was found
+}
+
+Look for location text in banners, headers, footers, or any text overlays on the image.
+Return {"found": false} if no location information is visible.`,
+          },
+        ],
+      }],
+    });
+
+    const responseText = message.content[0].text;
+    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const result = JSON.parse(jsonMatch[0]);
+      if (result.found) {
+        console.log(`    📷 Extracted location from image: ${result.city || result.venue || 'partial info'}`);
+        return result;
+      }
+    }
+  } catch (e) {
+    console.log(`    Could not analyze image: ${e.message}`);
+  }
+
+  return null;
+}
+
+/**
  * Use Claude to determine if a potential event is legitimate and relevant
  * @param {Object} eventData - The event data to validate
  * @param {Object} runStats - Optional run stats object (tracking done at call site)
@@ -57,10 +142,19 @@ REJECT events that are general tech without AI focus:
 - General networking or career events
 
 Other validation criteria:
-- Is this actually in Austin, TX (not virtual-only, not another city)?
-- Does it appear to be a legitimate event (not spam, not a job posting)?
 - Is the date in the future (after ${today})?
-- Events scheduled months in advance are normal for recurring meetups - do NOT reject events in ${currentYear} or ${nextYear} as "too far in the future"`;
+- Does it appear to be a legitimate event (not spam, not a job posting)?
+- Events scheduled months in advance are normal for recurring meetups - do NOT reject events in ${currentYear} or ${nextYear} as "too far in the future"
+
+CRITICAL - Location Verification:
+The event MUST be physically located in Austin, TX or the immediate Austin metro area (Travis, Williamson, Hays counties).
+
+IMPORTANT: You MUST verify the location based on venue_name or address fields in the event data, NOT based on the organizer name. An organization named "Austin AI Alliance" or similar does NOT mean the event is in Austin - they may host events in other cities.
+
+- If venue_name and address are both null/empty, set isValid to FALSE with reason "No venue/address provided - cannot verify Austin location"
+- If the address shows a city other than Austin (e.g., San Antonio, Houston, Dallas, San Marcos, New Braunfels), reject it
+- Virtual-only events should be rejected (this calendar is for in-person Austin events)
+- "Austin area" or "Greater Austin" is acceptable; cities 50+ miles away are NOT`;
 
   const message = await anthropic.messages.create({
     model: config.claudeModel,
