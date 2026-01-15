@@ -1,6 +1,7 @@
 import { getJson } from 'serpapi';
 import * as cheerio from 'cheerio';
 import { config } from '../config.js';
+import { decodeHtmlEntities } from '../utils/html.js';
 
 /**
  * Fetch an event page and extract full details including end_time
@@ -31,8 +32,8 @@ async function fetchEventDetails(url) {
         for (const item of items) {
           if (item['@type'] === 'Event') {
             eventData = {
-              title: item.name,
-              description: item.description,
+              title: decodeHtmlEntities(item.name),
+              description: decodeHtmlEntities(item.description),
               start_time: item.startDate,
               end_time: item.endDate || null,
               venue_name: item.location?.name,

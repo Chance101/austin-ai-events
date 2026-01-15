@@ -1,4 +1,5 @@
 import * as cheerio from 'cheerio';
+import { decodeHtmlEntities } from '../utils/html.js';
 
 /**
  * Scrape events from a Meetup group's events page
@@ -78,8 +79,8 @@ export async function scrapeMeetup(sourceConfig) {
         const isFree = !value.feeSettings;
 
         events.push({
-          title: value.title,
-          description: value.description || value.aeoDescription || null,
+          title: decodeHtmlEntities(value.title),
+          description: decodeHtmlEntities(value.description || value.aeoDescription) || null,
           url: value.eventUrl,
           source: sourceConfig.id,
           source_event_id: value.id,

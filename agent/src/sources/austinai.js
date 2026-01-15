@@ -1,4 +1,5 @@
 import * as cheerio from 'cheerio';
+import { decodeHtmlEntities } from '../utils/html.js';
 
 /**
  * Scrape events from Austin AI Alliance
@@ -157,8 +158,8 @@ export async function scrapeAustinAI(sourceConfig) {
 
         if (title && startTime) {
           events.push({
-            title: title.replace(/&#8211;/g, '-').replace(/&#8217;/g, "'"),
-            description: description || null,
+            title: decodeHtmlEntities(title),
+            description: decodeHtmlEntities(description) || null,
             url: eventUrl,
             source: sourceConfig.id,
             source_event_id: eventUrl.split('/').filter(Boolean).pop() || null,

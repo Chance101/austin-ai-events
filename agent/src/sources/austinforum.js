@@ -1,4 +1,5 @@
 import * as cheerio from 'cheerio';
+import { decodeHtmlEntities } from '../utils/html.js';
 
 /**
  * Scrape events from Austin Forum on Technology & Society
@@ -63,8 +64,8 @@ export async function scrapeAustinForum(sourceConfig) {
               const isAustin = city.toLowerCase().includes('austin');
 
               events.push({
-                title: data.name,
-                description: data.description,
+                title: decodeHtmlEntities(data.name),
+                description: decodeHtmlEntities(data.description),
                 url: eventUrl,
                 source: sourceConfig.id,
                 source_event_id: eventUrl.match(/tickets-(\d+)/)?.[1] || null,

@@ -1,4 +1,5 @@
 import * as cheerio from 'cheerio';
+import { decodeHtmlEntities } from '../utils/html.js';
 
 /**
  * Generic scraper for websites with event listings
@@ -31,8 +32,8 @@ export async function scrapeGeneric(sourceConfig) {
         items.forEach(item => {
           if (item['@type'] === 'Event') {
             events.push({
-              title: item.name,
-              description: item.description,
+              title: decodeHtmlEntities(item.name),
+              description: decodeHtmlEntities(item.description),
               url: item.url || sourceConfig.url,
               source: sourceConfig.id,
               source_event_id: item.identifier || null,

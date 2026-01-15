@@ -1,4 +1,5 @@
 import * as cheerio from 'cheerio';
+import { decodeHtmlEntities } from '../utils/html.js';
 
 /**
  * Scrape events from a Lu.ma calendar page
@@ -72,8 +73,8 @@ export async function scrapeLuma(sourceConfig) {
             const imageUrl = Array.isArray(event.image) ? event.image[0] : event.image;
 
             events.push({
-              title: event.name,
-              description: event.description || null,
+              title: decodeHtmlEntities(event.name),
+              description: decodeHtmlEntities(event.description) || null,
               url: eventUrl,
               source: sourceConfig.id,
               source_event_id: eventUrl?.split('/').pop() || null,

@@ -1,5 +1,6 @@
 import * as cheerio from 'cheerio';
 import { fromZonedTime } from 'date-fns-tz';
+import { decodeHtmlEntities } from '../utils/html.js';
 
 const AUSTIN_TIMEZONE = 'America/Chicago';
 
@@ -60,7 +61,7 @@ export async function scrapeAIAccelerator(sourceConfig) {
         }
 
         // Extract event details
-        const title = $el.find('[class*="eventTitle"]').text().trim();
+        const title = decodeHtmlEntities($el.find('[class*="eventTitle"]').text().trim());
         const dateText = $el.find('[class*="eventDate"]').text().trim();
         const location = $el.find('[class*="eventLocation"], [class*="eventCity"]').text().trim();
 
@@ -121,8 +122,8 @@ export async function scrapeAIAccelerator(sourceConfig) {
             if (startDate < new Date()) continue;
 
             events.push({
-              title: item.name,
-              description: item.description,
+              title: decodeHtmlEntities(item.name),
+              description: decodeHtmlEntities(item.description),
               url: item.url || sourceConfig.url,
               source: sourceConfig.id,
               source_event_id: item.identifier || null,

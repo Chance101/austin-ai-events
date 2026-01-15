@@ -1,5 +1,6 @@
 import * as cheerio from 'cheerio';
 import { fromZonedTime } from 'date-fns-tz';
+import { decodeHtmlEntities } from '../utils/html.js';
 
 const AUSTIN_TIMEZONE = 'America/Chicago';
 
@@ -59,8 +60,8 @@ export async function scrapeLeadersInAI(sourceConfig) {
           const eventYear = startDate.getFullYear();
           if (startDate >= new Date()) {
             events.push({
-              title: data.name,
-              description: data.description,
+              title: decodeHtmlEntities(data.name),
+              description: decodeHtmlEntities(data.description),
               url: sourceConfig.url,
               source: sourceConfig.id,
               source_event_id: `leaders-in-ai-austin-${eventYear}`,
