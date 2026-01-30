@@ -14,6 +14,7 @@ import LearningActivity from '@/components/observatory/LearningActivity';
 import PerformanceChart from '@/components/observatory/PerformanceChart';
 import SystemHealth from '@/components/observatory/SystemHealth';
 import VisitorCounter from '@/components/observatory/VisitorCounter';
+import EvolutionLog from '@/components/observatory/EvolutionLog';
 import PageTracker from '@/components/PageTracker';
 import { ThemeToggle } from '@/components/ThemeToggle';
 
@@ -252,7 +253,7 @@ export default function ObservatoryPage() {
         </div>
 
         {/* Third Row - Top Performing Queries + Exploration Queue */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
           <LearningActivity
             topPerformers={topPerformingQueries}
             explorationQueue={explorationQueries}
@@ -265,6 +266,11 @@ export default function ObservatoryPage() {
             loading={loading}
             section="exploration"
           />
+        </div>
+
+        {/* Evolution Log - Full Width */}
+        <div className="mb-8">
+          <EvolutionLog />
         </div>
 
         {/* Visitor Counter */}
