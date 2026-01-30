@@ -191,23 +191,33 @@ const response = await client.messages.create({
 
 ### Event Processing Pipeline
 1. **Scraping**: Each source returns `{ title, description, start_time, url, ... }`
-2. **Validation**: Claude validates structure and event quality (confidence score >= 0.6)
-   - **Trusted/config sources skip validation** (see Source Trust Tiers below)
-3. **Deduplication**:
+   - Scrapers should validate data quality before returning (e.g., `isGarbageText()` in aiaccelerator.js)
+2. **Pre-validation checks** (no Claude API cost):
+   - `isMalformedTitle()`: Rejects CSS, HTML, code in titles
+   - `checkAustinLocation()`: Fast string-based Austin location check for ALL events
+3. **Claude Validation**: Validates structure and event quality (confidence score >= 0.6)
+   - **Trusted/config sources skip validation only if Austin location is confirmed**
+   - Probation sources always validated
+4. **Deduplication**:
    - URL hash lookup in database
    - Fuzzy match against existing events (Fuse.js with default threshold)
    - Claude semantic analysis for edge cases
-4. **Classification**: Claude assigns audience and technical level
-5. **Upsert**: Insert or update in database, creating agent_run log entry
+5. **Classification**: Claude assigns audience and technical level
+6. **Upsert**: Insert or update in database, creating agent_run log entry
 
 ### Source Trust Tiers
 Sources are assigned trust tiers that determine validation behavior:
 
 **Tier Levels:**
 - `config`: Hardcoded sources in `config.js` - always trusted, never demoted
-- `trusted`: Earned trust through consistent quality - skip Claude validation
+- `trusted`: Earned trust through consistent quality - skip Claude validation (if Austin confirmed)
 - `probation`: New/unproven sources - require Claude validation for every event
 - `demoted`: Poor performers - excluded from scraping
+
+**Validation Logic for Trusted Sources:**
+- Austin location confirmed → skip Claude validation (cost savings)
+- NOT in Austin → reject immediately (no API call)
+- No location data → use Claude to verify (safety)
 
 **Promotion/Demotion Logic:**
 - New discovered sources start in `probation`
@@ -225,6 +235,10 @@ Sources are assigned trust tiers that determine validation behavior:
 - `getProbationSources()`: Returns up to 10 probation sources per run
 - `updateSourceValidationStats()`: Handles promotion/demotion logic
 - `isBroadSearchUrl()`: Filters garbage URLs (meetup.com/find/, eventbrite.com/d/, etc.)
+
+**Key Functions in `index.js`:**
+- `checkAustinLocation()`: Fast string-based Austin check (no API cost)
+- `isMalformedTitle()`: Detects CSS, HTML, code in titles
 
 ### Query Management
 Search queries are managed in the `search_queries` table:
