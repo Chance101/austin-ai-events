@@ -14,6 +14,16 @@ export interface StewardshipEntry {
 
 export const stewardshipLog: StewardshipEntry[] = [
   {
+    id: 'observatory-rebuild',
+    date: '2026-01-30',
+    title: 'Observatory Observability Architecture',
+    problem: 'The Observatory page showed agent stats but lacked true observability. No visibility into source health, decision reasoning, costs, or errors. The Evolution Log was a static changelog, not living system telemetry.',
+    action: 'Rebuilt Observatory with three-layer architecture: Agent Performance (what it does), Under the Hood (how it thinks/fails), Human Stewardship (how humans guide it). Added Source Health, Decision Log, Cost Tracking, and Error Log components.',
+    result: 'True observability: users can see trust tier changes, validation rates, API costs, and errors in real-time. The system tells its own story.',
+    category: 'capability',
+    commitHash: 'bfd10e9',
+  },
+  {
     id: 'trust-tiers',
     date: '2026-01-29',
     title: 'Source Trust Tier System',
