@@ -101,7 +101,12 @@ austin-ai-events/
 │
 └── supabase/
     ├── schema.sql                     # Database schema + ENUMs
-    └── seed.sql                       # Sample data
+    ├── seed.sql                       # Sample data
+    └── migrations/
+        ├── 001_search_queries_priority.sql
+        ├── 002_agent_runs.sql
+        ├── 003_source_trust_tiers.sql  # Trust tier columns for sources table
+        └── 003_data_cleanup.sql        # Initialize trust tiers for existing data
 ```
 
 ## Key Database Schema
@@ -119,7 +124,11 @@ austin-ai-events/
 **Tracking Tables:**
 - `agent_runs`: Discovery run statistics
 - `sources`: Tracked event sources for autonomous discovery
-- `search_queries`: Web search query logs
+  - `trust_tier`: 'config' | 'trusted' | 'probation' | 'demoted'
+  - `validation_pass_count`, `validation_fail_count`: Track event validation outcomes
+  - `consecutive_empty_scrapes`: Track scrapes that return no events
+  - `promoted_at`, `demoted_at`: Timestamps for tier changes
+- `search_queries`: Web search query logs (max 50 active, priority-based deactivation)
 - `daily_stats`: Aggregated metrics by date
 
 ## Development Patterns
@@ -160,12 +169,46 @@ const response = await client.messages.create({
 ### Event Processing Pipeline
 1. **Scraping**: Each source returns `{ title, description, start_time, url, ... }`
 2. **Validation**: Claude validates structure and event quality (confidence score >= 0.6)
+   - **Trusted/config sources skip validation** (see Source Trust Tiers below)
 3. **Deduplication**:
    - URL hash lookup in database
    - Fuzzy match against existing events (Fuse.js with default threshold)
    - Claude semantic analysis for edge cases
 4. **Classification**: Claude assigns audience and technical level
 5. **Upsert**: Insert or update in database, creating agent_run log entry
+
+### Source Trust Tiers
+Sources are assigned trust tiers that determine validation behavior:
+
+**Tier Levels:**
+- `config`: Hardcoded sources in `config.js` - always trusted, never demoted
+- `trusted`: Earned trust through consistent quality - skip Claude validation
+- `probation`: New/unproven sources - require Claude validation for every event
+- `demoted`: Poor performers - excluded from scraping
+
+**Promotion/Demotion Logic:**
+- New discovered sources start in `probation`
+- Promoted to `trusted` after 10+ validated events with 80%+ pass rate
+- Demoted after 10+ validated events with <30% pass rate
+- Demoted after 5 consecutive empty scrapes
+
+**Cost Optimization:**
+- Trusted sources skip ~$0.01-0.02 per event in Claude API calls
+- Only probation sources incur validation costs
+- Expected daily cost: ~$0.50-0.75 (down from ~$1.50)
+
+**Key Functions in `sourceDiscovery.js`:**
+- `getTrustedSources()`: Returns config + trusted tier sources
+- `getProbationSources()`: Returns up to 10 probation sources per run
+- `updateSourceValidationStats()`: Handles promotion/demotion logic
+- `isBroadSearchUrl()`: Filters garbage URLs (meetup.com/find/, eventbrite.com/d/, etc.)
+
+### Query Management
+Search queries are managed in the `search_queries` table:
+- **Deduplication**: New queries checked against existing before insert
+- **Cap**: Maximum 50 active queries at any time
+- **Deactivation**: Queries with priority < 0.1 after 5+ runs are deactivated
+- **Priority decay**: Queries that don't find new sources decrease in priority
 
 ## Critical Implementation Details
 
@@ -176,7 +219,9 @@ const response = await client.messages.create({
 - Audit needed: `luma.js`, `meetup.js`, `websearch.js`, `generic.js`, `austinai.js`, `austinforum.js` (see TODO.md)
 
 ### API Costs & Rate Limiting
-- **Claude API**: ~100-200 calls/day, estimated $5-15/month
+- **Claude API**: ~$0.50-0.75/day with trust tiers (was ~$1.50/day before)
+  - Trusted/config sources skip validation entirely
+  - Only probation sources incur validation costs
 - **SerpAPI**: Free tier covers ~5 searches/day
 - Agent includes 500ms delay between event processing to respect rate limits
 
