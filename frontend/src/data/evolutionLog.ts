@@ -14,6 +14,16 @@ export interface StewardshipEntry {
 
 export const stewardshipLog: StewardshipEntry[] = [
   {
+    id: 'location-validation-fix',
+    date: '2026-01-30',
+    title: 'Critical Location Validation Fix',
+    problem: 'Trust tier optimization was skipping ALL validation for trusted sources, including Austin location checks. 26 events were added overnight, most not actually in Austin. Also, AI Accelerator scraper was extracting CSS code instead of event titles.',
+    action: 'Added fast string-based Austin location check that runs for ALL events regardless of trust tier. Added malformed title detection for CSS/HTML/code. Updated trust logic: only skip Claude validation when Austin is positively confirmed.',
+    result: 'Location integrity restored while maintaining cost optimization. Non-Austin events now rejected immediately. CSS garbage titles now caught early.',
+    category: 'learning',
+    commitHash: '36c4892',
+  },
+  {
     id: 'observatory-rebuild',
     date: '2026-01-30',
     title: 'Observatory Observability Architecture',
