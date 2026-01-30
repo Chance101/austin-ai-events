@@ -4,6 +4,40 @@ import { decodeHtmlEntities } from '../utils/html.js';
 
 const AUSTIN_TIMEZONE = 'America/Chicago';
 
+/**
+ * Check if text looks like CSS, HTML, or code (not a valid event title)
+ */
+function isGarbageText(text) {
+  if (!text || text.length < 3) return true;
+
+  const garbagePatterns = [
+    /^\s*\.\w+[-\w]*\s*\{/,           // CSS class: .class-name {
+    /^\s*#[\w-]+\s*\{/,                // CSS ID: #id {
+    /position\s*:\s*\w+/i,             // CSS property
+    /display\s*:\s*\w+/i,              // CSS property
+    /margin\s*:\s*\d+/i,               // CSS property
+    /padding\s*:\s*\d+/i,              // CSS property
+    /font-\w+\s*:/i,                   // CSS font properties
+    /background\s*:/i,                 // CSS background
+    /^\s*<\w+/,                        // HTML tags
+    /^\s*\{\s*"/,                      // JSON objects
+    /[{}]{2,}/,                        // Multiple braces
+    /^\s*@media/i,                     // CSS media queries
+    /^\s*@import/i,                    // CSS imports
+    /&:hover/,                         // CSS pseudo-selectors
+  ];
+
+  for (const pattern of garbagePatterns) {
+    if (pattern.test(text)) return true;
+  }
+
+  // If mostly non-alphanumeric, it's garbage
+  const alphanumeric = text.replace(/[^a-zA-Z0-9\s]/g, '');
+  if (alphanumeric.length < text.length * 0.4) return true;
+
+  return false;
+}
+
 // Month name to 0-indexed number mapping
 const MONTH_MAP = {
   'january': 0, 'jan': 0,
@@ -60,10 +94,29 @@ export async function scrapeAIAccelerator(sourceConfig) {
           eventUrl = new URL(eventUrl, sourceConfig.url).href;
         }
 
-        // Extract event details
-        const title = decodeHtmlEntities($el.find('[class*="eventTitle"]').text().trim());
+        // Extract event details - get direct text content, not nested elements
+        const $titleEl = $el.find('[class*="eventTitle"]').first();
+        // Use .contents() to get only direct text, avoiding nested style/script tags
+        let title = '';
+        $titleEl.contents().each((_, node) => {
+          if (node.type === 'text') {
+            title += $(node).text();
+          }
+        });
+        title = decodeHtmlEntities(title.trim());
+
+        // If no direct text found, try the full text but validate it
+        if (!title) {
+          title = decodeHtmlEntities($titleEl.text().trim());
+        }
+
         const dateText = $el.find('[class*="eventDate"]').text().trim();
         const location = $el.find('[class*="eventLocation"], [class*="eventCity"]').text().trim();
+
+        // Skip garbage titles (CSS, HTML, code)
+        if (isGarbageText(title)) {
+          return; // continue to next element
+        }
 
         if (title && eventUrl) {
           // Parse date (format varies: "Feb 25" or "February 25, 2025")
@@ -121,8 +174,11 @@ export async function scrapeAIAccelerator(sourceConfig) {
             const startDate = new Date(item.startDate);
             if (startDate < new Date()) continue;
 
+            const jsonTitle = decodeHtmlEntities(item.name);
+            if (isGarbageText(jsonTitle)) continue;
+
             events.push({
-              title: decodeHtmlEntities(item.name),
+              title: jsonTitle,
               description: decodeHtmlEntities(item.description),
               url: item.url || sourceConfig.url,
               source: sourceConfig.id,
