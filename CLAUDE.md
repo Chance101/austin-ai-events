@@ -145,6 +145,18 @@ austin-ai-events/
 - Error handling with try-catch, failures logged to Supabase
 - Configuration validation on startup (config.js)
 
+### Documentation Requirements
+**IMPORTANT**: When making significant changes, always update this file before committing.
+
+Update CLAUDE.md when:
+- Adding new systems or architectural patterns (e.g., trust tiers, caching)
+- Adding new database tables or columns
+- Changing the event processing pipeline
+- Adding new scrapers or data sources
+- Modifying cost-impacting behavior (API calls, rate limits)
+
+Workflow: **Code → Test → Document → Commit**
+
 ### Claude API Usage
 **Current Model**: `claude-sonnet-4-5`
 
