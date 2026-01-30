@@ -10,7 +10,7 @@ import { scrapeLeadersInAI } from './sources/leadersinai.js';
 import { validateEvent, classifyEvent, extractLocationFromImage } from './utils/claude.js';
 import { findDuplicates, getEventHash } from './utils/dedup.js';
 import { upsertEvent, getExistingEvents, logAgentRun } from './utils/supabase.js';
-import { discoverSources, getTrustedSources, updateSourceStats } from './discovery/sourceDiscovery.js';
+import { discoverSources, getTrustedSources, getProbationSources, updateSourceStats, updateSourceValidationStats } from './discovery/sourceDiscovery.js';
 import { analyzeUnprocessedFeedback } from './feedback/analyzeFeedback.js';
 
 /**
@@ -106,8 +106,11 @@ async function discoverEvents() {
 
   console.log('📡 Gathering sources...');
 
-  // Start with config sources
-  const allSources = [...config.sources];
+  // Start with config sources (mark them as 'config' tier)
+  const allSources = config.sources.map(s => ({
+    ...s,
+    trust_tier: 'config',  // Config sources are always trusted
+  }));
   const configUrls = new Set(config.sources.map(s => s.url));
 
   // Add trusted DB sources not in config
@@ -123,10 +126,27 @@ async function discoverEvents() {
           url: dbSource.url,
           type: mapSourceType(dbSource.source_type),
           fromDb: true,
+          trust_tier: dbSource.trust_tier || 'trusted',
         });
       }
     }
-    console.log(`  Config sources: ${config.sources.length}, DB sources: ${dbSources.length}`);
+
+    // Also add probation sources (limited to 10 per run)
+    const probationSources = await getProbationSources();
+    for (const dbSource of probationSources) {
+      if (!configUrls.has(dbSource.url)) {
+        allSources.push({
+          id: 'web-search',
+          name: dbSource.name,
+          url: dbSource.url,
+          type: mapSourceType(dbSource.source_type),
+          fromDb: true,
+          trust_tier: 'probation',
+        });
+      }
+    }
+
+    console.log(`  Config sources: ${config.sources.length}, Trusted DB: ${dbSources.length}, Probation: ${probationSources.length}`);
     console.log(`  Total unique sources: ${allSources.length}\n`);
   } catch (error) {
     console.error('Error fetching DB sources:', error.message);
@@ -167,6 +187,13 @@ async function discoverEvents() {
       }
 
       console.log(`    Found ${events.length} events`);
+
+      // Attach source metadata to each event for conditional validation
+      events.forEach(e => {
+        e._sourceUrl = source.url;
+        e._sourceTier = source.trust_tier || (source.fromDb ? 'probation' : 'config');
+      });
+
       allDiscoveredEvents.push(...events);
       runStats.sourcesScraped++;
 
@@ -205,6 +232,9 @@ async function discoverEvents() {
 
   // 4. Validate and process each event
   console.log('\n✅ Validating and classifying events...');
+
+  // Track validation stats per source for promotion/demotion
+  const sourceValidationStats = new Map(); // url -> { passed: 0, failed: 0 }
 
   for (const event of allDiscoveredEvents) {
     try {
@@ -259,10 +289,31 @@ async function discoverEvents() {
         }
       }
 
-      // Validate with Claude
-      console.log(`  🔍 Validating: ${event.title?.substring(0, 50)}...`);
-      const validation = await validateEvent(event, runStats);
-      runStats.claudeApiCalls++;
+      // Skip Claude validation for trusted/config sources
+      const skipValidation = event._sourceTier === 'config' || event._sourceTier === 'trusted';
+
+      let validation;
+      if (skipValidation) {
+        // Trust the source - assume valid
+        validation = { isValid: true, confidence: 0.85, reason: 'Trusted source' };
+        console.log(`  ✅ Trusted source, skipping validation: ${event.title?.substring(0, 50)}...`);
+      } else {
+        // Validate with Claude for probation sources
+        console.log(`  🔍 Validating (probation): ${event.title?.substring(0, 50)}...`);
+        validation = await validateEvent(event, runStats);
+        runStats.claudeApiCalls++;
+
+        // Track validation results per source
+        if (event._sourceUrl) {
+          const stats = sourceValidationStats.get(event._sourceUrl) || { passed: 0, failed: 0 };
+          if (validation.isValid && validation.confidence >= 0.6) {
+            stats.passed++;
+          } else {
+            stats.failed++;
+          }
+          sourceValidationStats.set(event._sourceUrl, stats);
+        }
+      }
 
       if (!validation.isValid || validation.confidence < 0.6) {
         console.log(`    ❌ Invalid: ${validation.reason}`);
@@ -353,6 +404,12 @@ async function discoverEvents() {
   console.log(`    SerpAPI calls:        ${runStats.serpapiCalls}`);
   console.log(`    Errors:               ${runStats.errors}`);
   console.log('='.repeat(50));
+
+  // 5.5. Update source validation stats for promotion/demotion
+  if (sourceValidationStats.size > 0) {
+    console.log('\n📊 Updating source validation stats...');
+    await updateSourceValidationStats(sourceValidationStats);
+  }
 
   // 6. Log run to database
   await logAgentRun(runStats);

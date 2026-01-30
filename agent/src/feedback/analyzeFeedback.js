@@ -150,6 +150,7 @@ Respond with ONLY valid JSON:
 
 /**
  * Add a new source to the database
+ * Sources from feedback start in probation tier to earn trust
  */
 async function addSource(url, name, sourceType, reasoning) {
   const { error } = await supabase
@@ -158,7 +159,8 @@ async function addSource(url, name, sourceType, reasoning) {
       name: name,
       url: url,
       source_type: sourceType || 'other',
-      is_trusted: true,
+      is_trusted: false,  // Start untrusted
+      trust_tier: 'probation',  // Start in probation tier
       trust_score: 0.8,
       discovery_reasoning: `Added from feedback analysis: ${reasoning}`,
     });

@@ -262,6 +262,7 @@ Return ONLY the JSON object, no other text.`;
 
 /**
  * Add a new source to the database
+ * All new sources start in 'probation' tier until they earn trust
  */
 async function addSource(urlInfo, evaluation) {
   const { error } = await supabase
@@ -270,7 +271,8 @@ async function addSource(urlInfo, evaluation) {
       name: evaluation.suggested_name || urlInfo.title,
       url: urlInfo.url,
       source_type: evaluation.source_type || 'other',
-      is_trusted: evaluation.trust_score >= 0.7,
+      is_trusted: false,  // No longer immediately trusted
+      trust_tier: 'probation',  // Start in probation
       trust_score: evaluation.trust_score,
       discovery_reasoning: evaluation.reasoning,
     });
@@ -330,29 +332,29 @@ async function updateQueryStats(queryId, sourcesFound) {
 }
 
 /**
- * Deactivate underperforming queries with strict criteria.
+ * Deactivate underperforming queries with relaxed criteria.
  * Only deactivate if ALL conditions are met:
- * - created_by = 'agent' (NEVER deactivate seed queries)
- * - times_run >= 10
+ * - created_by = 'agent' (NEVER deactivate seed or feedback queries)
+ * - times_run >= 5 (down from 10)
  * - sources_found = 0
- * - priority_score < 0.01
+ * - priority_score < 0.1 (up from 0.01)
  */
 async function deactivateFailedQueries() {
-  // Only consider agent-created queries with 10+ runs
+  // Only consider agent-created queries with 5+ runs
   const { data: queries } = await supabase
     .from('search_queries')
     .select('id, query_text, times_run, sources_found, priority_score, created_by')
     .eq('is_active', true)
     .eq('created_by', 'agent')  // Never deactivate seed queries
-    .gte('times_run', 10)
+    .gte('times_run', 5)
     .eq('sources_found', 0);
 
   if (!queries) return 0;
 
   let deactivated = 0;
   for (const query of queries) {
-    // Final check: only deactivate if priority has fully decayed
-    if (query.priority_score < 0.01) {
+    // Final check: only deactivate if priority has decayed significantly
+    if (query.priority_score < 0.1) {
       await supabase
         .from('search_queries')
         .update({ is_active: false })
@@ -411,11 +413,28 @@ Return ONLY a JSON array of 3 strings, no other text:
 }
 
 /**
- * Add new queries to the database
+ * Add new queries to the database with deduplication
  */
 async function addNewQueries(queries) {
   let added = 0;
+
+  // Get existing query texts for deduplication
+  const { data: existing } = await supabase
+    .from('search_queries')
+    .select('query_text')
+    .eq('is_active', true);
+
+  const existingTexts = new Set((existing || []).map(q => q.query_text.toLowerCase().trim()));
+
   for (const queryText of queries) {
+    const normalizedQuery = queryText.toLowerCase().trim();
+
+    // Skip if similar query exists
+    if (existingTexts.has(normalizedQuery)) {
+      console.log(`    ⏭️  Query already exists: "${queryText}"`);
+      continue;
+    }
+
     const { error } = await supabase
       .from('search_queries')
       .insert({
@@ -426,6 +445,7 @@ async function addNewQueries(queries) {
     if (!error) {
       console.log(`    Added new query: "${queryText}"`);
       added++;
+      existingTexts.add(normalizedQuery);
     }
   }
   return added;
@@ -487,6 +507,12 @@ export async function discoverSources(runStats = null) {
         continue;
       }
 
+      // Skip broad search URLs (Meetup find, Eventbrite directory, etc.)
+      if (isBroadSearchUrl(result.url)) {
+        console.log(`    ⏭️  Skipping broad search URL: ${result.url.substring(0, 60)}...`);
+        continue;
+      }
+
       stats.urlsEvaluated++;
       console.log(`    🔎 Evaluating: ${result.url.substring(0, 60)}...`);
 
@@ -535,17 +561,28 @@ export async function discoverSources(runStats = null) {
 
   // Learning loop: suggest new queries
   console.log('\n  🧠 Learning loop: generating new queries...');
-  const existingQueryTexts = queries.map(q => q.query_text);
-  const { data: allQueries } = await supabase
+
+  // Check total active queries before adding more
+  const { count: activeQueryCount } = await supabase
     .from('search_queries')
-    .select('query_text');
+    .select('*', { count: 'exact', head: true })
+    .eq('is_active', true);
 
-  const allQueryTexts = (allQueries || []).map(q => q.query_text);
-  const suggestedQueries = await suggestNewQueries(discoveredSources, allQueryTexts);
-  stats.claudeApiCalls++;  // Track Claude API call for query suggestion
+  if (activeQueryCount >= 50) {
+    console.log(`    ⚠️ Query cap reached (${activeQueryCount}/50), skipping new query generation`);
+  } else {
+    const existingQueryTexts = queries.map(q => q.query_text);
+    const { data: allQueries } = await supabase
+      .from('search_queries')
+      .select('query_text');
 
-  if (suggestedQueries.length > 0) {
-    stats.newQueriesAdded = await addNewQueries(suggestedQueries);
+    const allQueryTexts = (allQueries || []).map(q => q.query_text);
+    const suggestedQueries = await suggestNewQueries(discoveredSources, allQueryTexts);
+    stats.claudeApiCalls++;  // Track Claude API call for query suggestion
+
+    if (suggestedQueries.length > 0) {
+      stats.newQueriesAdded = await addNewQueries(suggestedQueries);
+    }
   }
 
   // Print summary
@@ -576,6 +613,25 @@ function isSingleEventUrl(url) {
     /lu\.ma\/[a-zA-Z0-9-]+$/,           // Lu.ma single event (but not /lu.ma/calendar/...)
     /\/event-details\//,                // Common single event pattern
     /\/event\?id=/,                     // Query param event ID
+  ];
+  return patterns.some(p => p.test(url));
+}
+
+/**
+ * Check if URL is a broad search/directory page (not a specific source)
+ * These URLs return many results but aren't trackable sources
+ */
+function isBroadSearchUrl(url) {
+  const patterns = [
+    /meetup\.com\/find\//i,           // Meetup search results
+    /meetup\.com\/search/i,           // Meetup search
+    /eventbrite\.com\/d\//i,          // Eventbrite directory/search
+    /\/search\?/i,                    // Generic search with query params
+    /\/find\?/i,                      // Generic find with query params
+    /\/discover\/?$/i,                // Discovery pages
+    /\/explore\/?$/i,                 // Explore pages
+    /[?&]keywords?=/i,                // URL with keyword search params
+    /[?&]q=/i,                        // URL with search query param
   ];
   return patterns.some(p => p.test(url));
 }
@@ -612,13 +668,14 @@ function shouldSkipUrl(url) {
 }
 
 /**
- * Get all trusted sources from the database
+ * Get sources with 'trusted' or 'config' tier from the database
+ * These are sources that have earned trust and can skip validation
  */
 export async function getTrustedSources() {
   const { data, error } = await supabase
     .from('sources')
     .select('*')
-    .eq('is_trusted', true)
+    .in('trust_tier', ['trusted', 'config'])
     .order('trust_score', { ascending: false });
 
   if (error) {
@@ -630,18 +687,107 @@ export async function getTrustedSources() {
 }
 
 /**
+ * Get sources in probation tier (need validation)
+ * Limited to 10 per run to control API costs
+ */
+export async function getProbationSources() {
+  const { data, error } = await supabase
+    .from('sources')
+    .select('*')
+    .eq('trust_tier', 'probation')
+    .order('trust_score', { ascending: false })
+    .limit(10);
+
+  if (error) {
+    console.error('Error fetching probation sources:', error.message);
+    return [];
+  }
+
+  return data || [];
+}
+
+/**
  * Update source statistics after scraping
+ * Tracks consecutive empty scrapes and demotes after 5
  */
 export async function updateSourceStats(sourceUrl, eventsFound) {
+  // First get current source data
+  const { data: source } = await supabase
+    .from('sources')
+    .select('consecutive_empty_scrapes, trust_tier, name')
+    .eq('url', sourceUrl)
+    .single();
+
+  const updates = {
+    last_scraped: new Date().toISOString(),
+    events_found_count: eventsFound,
+  };
+
+  if (eventsFound === 0) {
+    updates.consecutive_empty_scrapes = (source?.consecutive_empty_scrapes || 0) + 1;
+
+    // Demote after 5 consecutive empty scrapes (skip config sources)
+    if (updates.consecutive_empty_scrapes >= 5 && source?.trust_tier !== 'config') {
+      updates.trust_tier = 'demoted';
+      updates.is_trusted = false;
+      updates.demoted_at = new Date().toISOString();
+      console.log(`    ⬇️ Demoted source (5 empty scrapes): ${source?.name || sourceUrl}`);
+    }
+  } else {
+    updates.consecutive_empty_scrapes = 0;
+  }
+
   const { error } = await supabase
     .from('sources')
-    .update({
-      last_scraped: new Date().toISOString(),
-      events_found_count: eventsFound,
-    })
+    .update(updates)
     .eq('url', sourceUrl);
 
   if (error) {
     console.error(`Error updating source stats: ${error.message}`);
+  }
+}
+
+/**
+ * Update source validation statistics after a run
+ * Handles promotion and demotion based on validation pass rates
+ */
+export async function updateSourceValidationStats(statsMap) {
+  for (const [url, stats] of statsMap) {
+    // Get current source data
+    const { data: source } = await supabase
+      .from('sources')
+      .select('*')
+      .eq('url', url)
+      .single();
+
+    if (!source || source.trust_tier === 'config') continue;
+
+    const newPassCount = (source.validation_pass_count || 0) + stats.passed;
+    const newFailCount = (source.validation_fail_count || 0) + stats.failed;
+    const totalValidated = newPassCount + newFailCount;
+    const passRate = totalValidated > 0 ? newPassCount / totalValidated : 0;
+
+    const updates = {
+      validation_pass_count: newPassCount,
+      validation_fail_count: newFailCount,
+    };
+
+    // Check for promotion (probation → trusted)
+    if (source.trust_tier === 'probation' && totalValidated >= 10 && passRate >= 0.8) {
+      updates.trust_tier = 'trusted';
+      updates.is_trusted = true;
+      updates.promoted_at = new Date().toISOString();
+      console.log(`    🎉 Promoted source to trusted: ${source.name} (${Math.round(passRate * 100)}% pass rate)`);
+    }
+
+    // Check for demotion (probation → demoted)
+    if (source.trust_tier === 'probation' && totalValidated >= 10 && passRate < 0.3) {
+      updates.trust_tier = 'demoted';
+      updates.is_trusted = false;
+      updates.demoted_at = new Date().toISOString();
+      console.log(`    ⬇️ Demoted source: ${source.name} (${Math.round(passRate * 100)}% pass rate)`);
+    }
+
+    await supabase.from('sources').update(updates).eq('url', url);
   }
 }
