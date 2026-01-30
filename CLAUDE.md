@@ -67,9 +67,12 @@ austin-ai-events/
 │   │   │   ├── EventFilters.tsx       # Filter controls (client-side)
 │   │   │   ├── EventModal.tsx         # Event details modal
 │   │   │   ├── PageTracker.tsx        # Analytics (Vercel)
-│   │   │   └── observatory/           # Dashboard visualizations
+│   │   │   └── observatory/           # Three-layer observability dashboard
+│   │   │       ├── (Agent Performance) # LastRunCard, PerformanceChart, SystemHealth, etc.
+│   │   │       ├── (Under the Hood)    # SourceHealth, DecisionLog, CostTracking, ErrorLog
+│   │   │       └── HumanStewardship.tsx # Human-AI collaboration log
 │   │   ├── data/
-│   │   │   └── evolutionLog.ts        # Agent evolution history (update when making changes!)
+│   │   │   └── evolutionLog.ts        # Stewardship entries (Problem → Action → Result)
 │   │   ├── lib/
 │   │   │   ├── supabase.ts            # Browser client
 │   │   │   └── supabase-server.ts     # Server-side fetching (fetchEventsServer)
@@ -249,6 +252,24 @@ Search queries are managed in the `search_queries` table:
 - Revalidation interval: 300 seconds (5 minutes)
 - Events query window: 30 days from today
 - Full-text search supported via Supabase
+
+### Observatory Page Architecture
+The Observatory (`/observatory`) provides transparency through three layers:
+
+1. **Agent Performance** - What the agent does autonomously
+   - Last run stats, performance chart, system health
+   - Activity feed, discovery stats, learning activity (queries)
+
+2. **Under the Hood** - How the agent thinks and fails
+   - Source Health: trust tier distribution, promotions/demotions
+   - Decision Log: validation pass/reject rates per run
+   - Cost Tracking: API costs and efficiency metrics
+   - Error Log: categorized failures with context
+
+3. **Human Stewardship** - How humans guide the agent
+   - Problem → Action → Result format
+   - Located in `src/data/evolutionLog.ts`
+   - Update when making significant agent changes
 
 ### Agent Concurrency
 - GitHub Actions workflow has concurrency lock (single run at a time)
