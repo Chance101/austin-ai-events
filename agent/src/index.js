@@ -54,6 +54,98 @@ function mapSourceType(dbType) {
   return typeMap[dbType] || 'scrape';
 }
 
+/**
+ * Quick sanity check for Austin location - runs for ALL events regardless of trust tier
+ * This is a fast string-based check that doesn't require Claude API calls
+ * Returns: { isAustin: boolean, reason: string }
+ */
+function checkAustinLocation(event) {
+  const venueOrAddress = [event.venue_name, event.address, event.location]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  // Known non-Austin cities that events might be from
+  const nonAustinCities = [
+    'san antonio', 'houston', 'dallas', 'fort worth', 'san marcos',
+    'new braunfels', 'san francisco', 'los angeles', 'new york',
+    'chicago', 'seattle', 'denver', 'boston', 'atlanta', 'miami',
+    'phoenix', 'portland', 'washington dc', 'philadelphia', 'london',
+    'virtual', 'online only', 'webinar', 'remote', 'zoom only',
+    'killeen', 'waco', 'college station', 'corpus christi', 'el paso',
+    'lubbock', 'amarillo', 'brownsville', 'laredo', 'mcallen',
+  ];
+
+  // Check for explicit non-Austin locations
+  for (const city of nonAustinCities) {
+    if (venueOrAddress.includes(city)) {
+      return { isAustin: false, reason: `Location appears to be in ${city}, not Austin` };
+    }
+  }
+
+  // Austin area indicators
+  const austinIndicators = [
+    'austin', 'tx 78', '787', 'travis county', 'williamson county',
+    'hays county', 'round rock', 'cedar park', 'pflugerville',
+    'leander', 'georgetown', 'dripping springs', 'lakeway', 'bee cave',
+    'capital factory', 'domain', 'downtown austin', 'south congress',
+    'east austin', 'soco', '6th street', 'rainey street', 'ut austin',
+    'university of texas', 'acc ', 'st. edwards', 'concordia',
+  ];
+
+  // If venue/address is provided, check for Austin indicators
+  if (venueOrAddress.length > 3) {
+    for (const indicator of austinIndicators) {
+      if (venueOrAddress.includes(indicator)) {
+        return { isAustin: true, reason: 'Location matches Austin area' };
+      }
+    }
+    // Has location data but no Austin match - suspicious
+    return { isAustin: false, reason: 'Location provided but no Austin indicators found' };
+  }
+
+  // No location data at all - will need Claude validation
+  return { isAustin: null, reason: 'No location data to verify' };
+}
+
+/**
+ * Check if a title looks malformed (CSS, HTML, or garbage)
+ * Returns true if title appears invalid
+ */
+function isMalformedTitle(title) {
+  if (!title) return true;
+
+  const malformedPatterns = [
+    /^\s*\.\w+[-\w]*\s*\{/,           // CSS class definitions: .class-name {
+    /position\s*:\s*relative/i,        // CSS property
+    /display\s*:\s*block/i,            // CSS property
+    /^\s*<\w+/,                        // HTML tags
+    /^\s*\[\w+\]/,                     // Attribute selectors
+    /^\s*#[\w-]+\s*\{/,                // CSS ID selectors
+    /&:hover/,                         // CSS pseudo-selectors
+    /^\s*@media/i,                     // CSS media queries
+    /^\s*@import/i,                    // CSS imports
+    /^\s*function\s*\(/,               // JavaScript
+    /^\s*const\s+\w+/,                 // JavaScript
+    /^\s*var\s+\w+/,                   // JavaScript
+    /[{}]{2,}/,                        // Multiple braces
+  ];
+
+  for (const pattern of malformedPatterns) {
+    if (pattern.test(title)) {
+      return true;
+    }
+  }
+
+  // Title is mostly non-alphanumeric
+  const alphanumeric = title.replace(/[^a-zA-Z0-9]/g, '');
+  if (alphanumeric.length < title.length * 0.3) {
+    return true;
+  }
+
+  return false;
+}
+
 async function discoverEvents() {
   console.log('🚀 Starting Austin AI Events discovery...\n');
 
@@ -264,6 +356,12 @@ async function discoverEvents() {
         continue;
       }
 
+      // Skip events with malformed titles (CSS, HTML, code, etc.)
+      if (isMalformedTitle(titleTrimmed)) {
+        console.log(`  ⚠️  Skipping event with malformed title (CSS/code detected): "${titleTrimmed.substring(0, 60)}..."`);
+        continue;
+      }
+
       // Quick dedupe check by URL hash
       const hash = getEventHash(event);
       if (existingHashes.has(hash)) {
@@ -289,16 +387,28 @@ async function discoverEvents() {
         }
       }
 
-      // Skip Claude validation for trusted/config sources
-      const skipValidation = event._sourceTier === 'config' || event._sourceTier === 'trusted';
+      // ALWAYS check Austin location first (doesn't use Claude API)
+      const locationCheck = checkAustinLocation(event);
+
+      // Skip Claude validation for trusted/config sources, BUT only if location is confirmed Austin
+      const isTrustedSource = event._sourceTier === 'config' || event._sourceTier === 'trusted';
 
       let validation;
-      if (skipValidation) {
-        // Trust the source - assume valid
-        validation = { isValid: true, confidence: 0.85, reason: 'Trusted source' };
-        console.log(`  ✅ Trusted source, skipping validation: ${event.title?.substring(0, 50)}...`);
+      if (isTrustedSource && locationCheck.isAustin === true) {
+        // Trusted source with confirmed Austin location - skip Claude validation
+        validation = { isValid: true, confidence: 0.85, reason: 'Trusted source with verified Austin location' };
+        console.log(`  ✅ Trusted source, verified Austin: ${event.title?.substring(0, 50)}...`);
+      } else if (isTrustedSource && locationCheck.isAustin === false) {
+        // Trusted source but NOT in Austin - reject without Claude call
+        validation = { isValid: false, confidence: 0.9, reason: locationCheck.reason };
+        console.log(`  ❌ Trusted source but NOT Austin: ${event.title?.substring(0, 50)}... (${locationCheck.reason})`);
+      } else if (isTrustedSource && locationCheck.isAustin === null) {
+        // Trusted source but no location data - need Claude to verify
+        console.log(`  🔍 Trusted source, no location - validating: ${event.title?.substring(0, 50)}...`);
+        validation = await validateEvent(event, runStats);
+        runStats.claudeApiCalls++;
       } else {
-        // Validate with Claude for probation sources
+        // Probation source - always validate with Claude
         console.log(`  🔍 Validating (probation): ${event.title?.substring(0, 50)}...`);
         validation = await validateEvent(event, runStats);
         runStats.claudeApiCalls++;
