@@ -14,7 +14,7 @@ export interface AgentRun {
   events_updated: number;
   duplicates_skipped: number;
   errors: number;
-  error_messages: string[];
+  error_messages: Array<string | { source?: string; error?: string; message?: string; timestamp?: string }>;
   claude_api_calls: number;
   serpapi_calls: number;
   created_at: string;
@@ -29,6 +29,13 @@ export interface Source {
   trust_score: number | null;
   discovery_reasoning: string | null;
   created_at: string;
+  // Trust tier fields
+  trust_tier: 'config' | 'trusted' | 'probation' | 'demoted';
+  validation_pass_count: number;
+  validation_fail_count: number;
+  consecutive_empty_scrapes: number;
+  promoted_at: string | null;
+  demoted_at: string | null;
 }
 
 export interface SearchQuery {

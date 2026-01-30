@@ -96,7 +96,9 @@ export default function LastRunCard({ run, loading }: LastRunCardProps) {
           <p className="text-sm font-medium text-amber-800 dark:text-amber-200">Errors:</p>
           <ul className="mt-1 text-sm text-amber-700 dark:text-amber-300 list-disc list-inside">
             {run.error_messages.slice(0, 3).map((msg, i) => (
-              <li key={i} className="truncate">{msg}</li>
+              <li key={i} className="truncate">
+                {typeof msg === 'string' ? msg : (msg.error || msg.message || 'Unknown error')}
+              </li>
             ))}
           </ul>
         </div>

@@ -6,6 +6,8 @@ import { subDays } from 'date-fns';
 import { supabase } from '@/lib/supabase';
 import { AgentRun, Source, SearchQuery, DailyStats } from '@/types/observatory';
 import { Event } from '@/types/event';
+
+// Components
 import HowItWorks from '@/components/observatory/HowItWorks';
 import LastRunCard from '@/components/observatory/LastRunCard';
 import ActivityFeed from '@/components/observatory/ActivityFeed';
@@ -14,15 +16,22 @@ import LearningActivity from '@/components/observatory/LearningActivity';
 import PerformanceChart from '@/components/observatory/PerformanceChart';
 import SystemHealth from '@/components/observatory/SystemHealth';
 import VisitorCounter from '@/components/observatory/VisitorCounter';
-import EvolutionLog from '@/components/observatory/EvolutionLog';
+import SectionHeader from '@/components/observatory/SectionHeader';
+import SourceHealth from '@/components/observatory/SourceHealth';
+import DecisionLog from '@/components/observatory/DecisionLog';
+import CostTracking from '@/components/observatory/CostTracking';
+import ErrorLog from '@/components/observatory/ErrorLog';
+import HumanStewardship from '@/components/observatory/HumanStewardship';
 import PageTracker from '@/components/PageTracker';
 import { ThemeToggle } from '@/components/ThemeToggle';
 
 export default function ObservatoryPage() {
   const [loading, setLoading] = useState(true);
   const [lastRun, setLastRun] = useState<AgentRun | null>(null);
+  const [recentRuns, setRecentRuns] = useState<AgentRun[]>([]);
   const [recentEvents, setRecentEvents] = useState<Event[]>([]);
   const [totalSources, setTotalSources] = useState(0);
+  const [allSources, setAllSources] = useState<Source[]>([]);
   const [recentSources, setRecentSources] = useState<Source[]>([]);
   const [sourcesThisWeek, setSourcesThisWeek] = useState(0);
   const [topPerformingQueries, setTopPerformingQueries] = useState<SearchQuery[]>([]);
@@ -53,6 +62,14 @@ export default function ObservatoryPage() {
         .single();
       setLastRun(lastRunData);
 
+      // Fetch recent runs (for decision log, cost tracking, error log)
+      const { data: recentRunsData } = await supabase
+        .from('agent_runs')
+        .select('*')
+        .order('started_at', { ascending: false })
+        .limit(30);
+      setRecentRuns(recentRunsData || []);
+
       // Fetch recent events (last 20 added)
       const { data: eventsData } = await supabase
         .from('events')
@@ -61,7 +78,14 @@ export default function ObservatoryPage() {
         .limit(20);
       setRecentEvents(eventsData || []);
 
-      // Fetch total trusted sources
+      // Fetch ALL sources with trust tier data
+      const { data: allSourcesData } = await supabase
+        .from('sources')
+        .select('*')
+        .order('created_at', { ascending: false });
+      setAllSources(allSourcesData || []);
+
+      // Fetch total trusted sources (legacy query)
       const { count: sourcesCount } = await supabase
         .from('sources')
         .select('*', { count: 'exact', head: true })
@@ -185,7 +209,7 @@ export default function ObservatoryPage() {
             </div>
             <div className="flex items-center justify-between gap-4 mt-1">
               <p className="text-gray-600 dark:text-gray-300">
-                Watch the AI agent discover and curate Austin AI events
+                A window into the human-AI collaboration behind Austin AI Events
               </p>
               {/* Mobile only: Back to Calendar button */}
               <Link
@@ -204,24 +228,31 @@ export default function ObservatoryPage() {
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* How It Works - Full Width */}
-        <div className="mb-8">
+        <div className="mb-12">
           <HowItWorks />
         </div>
 
-        {/* Last Run Card - Full Width */}
-        <div className="mb-8">
-          <LastRunCard run={lastRun} loading={loading} />
-        </div>
+        {/* ============================================ */}
+        {/* SECTION 1: AGENT PERFORMANCE */}
+        {/* ============================================ */}
+        <section className="mb-12">
+          <SectionHeader
+            title="Agent Performance"
+            subtitle="What the agent is doing autonomously"
+            icon="🤖"
+          />
 
-        {/* First Row - Performance Chart + System Health (same height) */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
-          <div className="lg:col-span-2 flex">
-            <div className="flex-1 flex flex-col">
+          {/* Last Run Card - Full Width */}
+          <div className="mb-6">
+            <LastRunCard run={lastRun} loading={loading} />
+          </div>
+
+          {/* Performance Chart + System Health */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+            <div className="lg:col-span-2">
               <PerformanceChart data={dailyStats} loading={loading} />
             </div>
-          </div>
-          <div className="flex">
-            <div className="flex-1 flex flex-col">
+            <div>
               <SystemHealth
                 totalRuns={totalRuns}
                 successfulRuns={successfulRuns}
@@ -231,17 +262,13 @@ export default function ObservatoryPage() {
               />
             </div>
           </div>
-        </div>
 
-        {/* Second Row - Activity Feed + Discovery Stats (same height) */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
-          <div className="lg:col-span-2 flex">
-            <div className="flex-1 flex flex-col">
+          {/* Activity Feed + Discovery Stats */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+            <div className="lg:col-span-2">
               <ActivityFeed events={recentEvents} loading={loading} />
             </div>
-          </div>
-          <div className="flex">
-            <div className="flex-1 flex flex-col">
+            <div>
               <DiscoveryStats
                 totalSources={totalSources}
                 recentSources={recentSources}
@@ -250,28 +277,59 @@ export default function ObservatoryPage() {
               />
             </div>
           </div>
-        </div>
 
-        {/* Third Row - Top Performing Queries + Exploration Queue */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-          <LearningActivity
-            topPerformers={topPerformingQueries}
-            explorationQueue={explorationQueries}
-            loading={loading}
-            section="top-performers"
-          />
-          <LearningActivity
-            topPerformers={topPerformingQueries}
-            explorationQueue={explorationQueries}
-            loading={loading}
-            section="exploration"
-          />
-        </div>
+          {/* Learning Activity */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <LearningActivity
+              topPerformers={topPerformingQueries}
+              explorationQueue={explorationQueries}
+              loading={loading}
+              section="top-performers"
+            />
+            <LearningActivity
+              topPerformers={topPerformingQueries}
+              explorationQueue={explorationQueries}
+              loading={loading}
+              section="exploration"
+            />
+          </div>
+        </section>
 
-        {/* Evolution Log - Full Width */}
-        <div className="mb-8">
-          <EvolutionLog />
-        </div>
+        {/* ============================================ */}
+        {/* SECTION 2: UNDER THE HOOD */}
+        {/* ============================================ */}
+        <section className="mb-12">
+          <SectionHeader
+            title="Under the Hood"
+            subtitle="How the agent thinks, decides, and sometimes fails"
+            icon="🔍"
+          />
+
+          {/* Source Health + Decision Log */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            <SourceHealth sources={allSources} loading={loading} />
+            <DecisionLog recentRuns={recentRuns} loading={loading} />
+          </div>
+
+          {/* Cost Tracking + Error Log */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <CostTracking recentRuns={recentRuns} loading={loading} />
+            <ErrorLog recentRuns={recentRuns} loading={loading} />
+          </div>
+        </section>
+
+        {/* ============================================ */}
+        {/* SECTION 3: HUMAN STEWARDSHIP */}
+        {/* ============================================ */}
+        <section className="mb-12">
+          <SectionHeader
+            title="Human Stewardship"
+            subtitle="How humans guide the agent's growth"
+            icon="🤝"
+          />
+
+          <HumanStewardship />
+        </section>
 
         {/* Visitor Counter */}
         <div className="mt-12">
@@ -282,7 +340,7 @@ export default function ObservatoryPage() {
       <footer className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 mt-auto">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <p className="text-sm text-gray-600 dark:text-gray-400">
-            This page provides transparency into the AI agent&apos;s decision-making process. The agent runs daily to discover and curate Austin AI events autonomously.
+            This observatory provides transparency into both the autonomous agent&apos;s operations and the human-AI collaboration that continuously improves it.
           </p>
         </div>
       </footer>
