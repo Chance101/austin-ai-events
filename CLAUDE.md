@@ -68,6 +68,8 @@ austin-ai-events/
 │   │   │   ├── EventModal.tsx         # Event details modal
 │   │   │   ├── PageTracker.tsx        # Analytics (Vercel)
 │   │   │   └── observatory/           # Dashboard visualizations
+│   │   ├── data/
+│   │   │   └── evolutionLog.ts        # Agent evolution history (update when making changes!)
 │   │   ├── lib/
 │   │   │   ├── supabase.ts            # Browser client
 │   │   │   └── supabase-server.ts     # Server-side fetching (fetchEventsServer)
@@ -155,7 +157,13 @@ Update CLAUDE.md when:
 - Adding new scrapers or data sources
 - Modifying cost-impacting behavior (API calls, rate limits)
 
-Workflow: **Code → Test → Document → Commit**
+Update `frontend/src/data/evolutionLog.ts` when:
+- Fixing agent bugs or improving agent logic
+- Adding new agent capabilities
+- Optimizing performance or costs
+- Any change worth showing on the Observatory's Evolution Log
+
+Workflow: **Code → Test → Document → Update Evolution Log → Commit**
 
 ### Claude API Usage
 **Current Model**: `claude-sonnet-4-5`
