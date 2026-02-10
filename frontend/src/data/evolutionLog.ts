@@ -21,6 +21,7 @@ export const stewardshipLog: StewardshipEntry[] = [
     action: 'Expanded getExistingEvents() to include events from the last 30 days instead of only future events. This ensures recently-passed events remain in the dedup set and are caught by URL hash matching before reaching upsert.',
     result: 'Eliminated phantom accepted events. The eventsAdded counter now accurately reflects only genuinely new events.',
     category: 'learning',
+    commitHash: '754c5f5',
   },
   {
     id: 'location-validation-fix',
