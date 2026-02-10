@@ -100,7 +100,8 @@ BEGIN
   NEW.updated_at = NOW();
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql
+SET search_path = '';
 
 -- Trigger to auto-update updated_at
 CREATE TRIGGER update_events_updated_at
@@ -125,7 +126,8 @@ CREATE POLICY "Service role can manage events"
   WITH CHECK (auth.role() = 'service_role');
 
 -- Create a view for upcoming events (convenience)
-CREATE VIEW upcoming_events AS
+-- security_invoker ensures the view respects the caller's RLS policies
+CREATE VIEW upcoming_events WITH (security_invoker = on) AS
 SELECT *
 FROM events
 WHERE start_time >= NOW()
