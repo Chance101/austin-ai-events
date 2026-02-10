@@ -111,7 +111,8 @@ austin-ai-events/
         ├── 001_search_queries_priority.sql
         ├── 002_agent_runs.sql
         ├── 003_source_trust_tiers.sql  # Trust tier columns for sources table
-        └── 003_data_cleanup.sql        # Initialize trust tiers for existing data
+        ├── 003_data_cleanup.sql        # Initialize trust tiers for existing data
+        └── 004_source_results.sql      # Per-source results JSONB on agent_runs
 ```
 
 ## Key Database Schema
@@ -128,6 +129,7 @@ austin-ai-events/
 
 **Tracking Tables:**
 - `agent_runs`: Discovery run statistics
+  - `source_results`: JSONB array of per-source event counts (`[{name, url, events}]`)
 - `sources`: Tracked event sources for autonomous discovery
   - `trust_tier`: 'config' | 'trusted' | 'probation' | 'demoted'
   - `validation_pass_count`, `validation_fail_count`: Track event validation outcomes
@@ -192,6 +194,9 @@ const response = await client.messages.create({
 ### Event Processing Pipeline
 1. **Scraping**: Each source returns `{ title, description, start_time, url, ... }`
    - Scrapers should validate data quality before returning (e.g., `isGarbageText()` in aiaccelerator.js)
+   - All scrapers filter out past events before returning (compare `start_time` against `new Date()`)
+   - Per-source event counts are tracked and logged to `agent_runs.source_results`
+   - Sources returning 0 events trigger a console warning for silent failure detection
 2. **Pre-validation checks** (no Claude API cost):
    - `isMalformedTitle()`: Rejects CSS, HTML, code in titles
    - `checkAustinLocation()`: Fast string-based Austin location check for ALL events
@@ -199,7 +204,7 @@ const response = await client.messages.create({
    - **Trusted/config sources skip validation only if Austin location is confirmed**
    - Probation sources always validated
 4. **Deduplication**:
-   - URL hash lookup in database
+   - URL hash lookup against existing events (includes past 30 days to prevent phantom re-adds)
    - Fuzzy match against existing events (Fuse.js with default threshold)
    - Claude semantic analysis for edge cases
 5. **Classification**: Claude assigns audience and technical level
@@ -235,17 +240,24 @@ Sources are assigned trust tiers that determine validation behavior:
 - `getProbationSources()`: Returns up to 10 probation sources per run
 - `updateSourceValidationStats()`: Handles promotion/demotion logic
 - `isBroadSearchUrl()`: Filters garbage URLs (meetup.com/find/, eventbrite.com/d/, etc.)
+- `getEventSearchQueries()`: Returns query strings for direct event search (oldest `last_run` first for rotation)
+- `getActiveQueries()`: Returns queries for source discovery using exploration budget strategy
 
 **Key Functions in `index.js`:**
 - `checkAustinLocation()`: Fast string-based Austin check (no API cost)
 - `isMalformedTitle()`: Detects CSS, HTML, code in titles
 
 ### Query Management
-Search queries are managed in the `search_queries` table:
+Search queries are managed in the `search_queries` table and used for two purposes:
+1. **Source discovery** (`discoverSources()`): 3 queries/run, finds new listing pages
+2. **Event search** (`searchEvents()`): 2 queries/run, finds individual events directly
+
+- **SerpAPI budget**: 5 searches/day total (3 source discovery + 2 event search)
 - **Deduplication**: New queries checked against existing before insert
 - **Cap**: Maximum 50 active queries at any time
 - **Deactivation**: Queries with priority < 0.1 after 5+ runs are deactivated
 - **Priority decay**: Queries that don't find new sources decrease in priority
+- **Event search rotation**: Queries selected by oldest `last_run` to ensure diversity
 
 ## Critical Implementation Details
 
@@ -259,7 +271,7 @@ Search queries are managed in the `search_queries` table:
 - **Claude API**: ~$0.50-0.75/day with trust tiers (was ~$1.50/day before)
   - Trusted/config sources skip validation entirely
   - Only probation sources incur validation costs
-- **SerpAPI**: Free tier covers ~5 searches/day
+- **SerpAPI**: Free tier covers ~5 searches/day (budget: 3 source discovery + 2 event search)
 - Agent includes 500ms delay between event processing to respect rate limits
 
 ### Frontend ISR
@@ -298,7 +310,7 @@ The Observatory (`/observatory`) provides transparency through three layers:
 - **Supabase Connection**: Verify `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` in `.env.local`
 
 ### Agent Issues
-- **Missing Events**: Check if source scrapers are returning data (logs in agent_runs table)
+- **Missing Events**: Check `agent_runs.source_results` JSONB to see per-source event counts. Sources returning 0 may be silently broken.
 - **Timezone Errors**: Verify source returns timezone-aware times or use `fromZonedTime()`
 - **Deduplication**: URL hash check happens first (fast), then fuzzy matching, then Claude analysis
 - **Claude API Errors**: Check token usage, model availability, API key validity
