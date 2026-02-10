@@ -14,6 +14,15 @@ export interface StewardshipEntry {
 
 export const stewardshipLog: StewardshipEntry[] = [
   {
+    id: 'phantom-accepted-fix',
+    date: '2026-02-10',
+    title: 'Fix Phantom "Accepted" Events in Agent Runs',
+    problem: 'Agent reported 2 "accepted" events each run, but no new events appeared on the calendar. Past events fell out of the dedup set (which only fetched future events), so re-scraped past events passed dedup checks, got upserted over themselves, and inflated the eventsAdded counter.',
+    action: 'Expanded getExistingEvents() to include events from the last 30 days instead of only future events. This ensures recently-passed events remain in the dedup set and are caught by URL hash matching before reaching upsert.',
+    result: 'Eliminated phantom accepted events. The eventsAdded counter now accurately reflects only genuinely new events.',
+    category: 'learning',
+  },
+  {
     id: 'location-validation-fix',
     date: '2026-01-30',
     title: 'Critical Location Validation Fix',

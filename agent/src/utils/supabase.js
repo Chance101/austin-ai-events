@@ -36,7 +36,8 @@ export async function getExistingEvents() {
   const { data, error } = await db
     .from('events')
     .select('id, title, start_time, source, source_event_id, url')
-    .gte('start_time', new Date().toISOString());
+    // Include past 30 days so recently-passed events are still caught by dedup
+    .gte('start_time', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString());
 
   if (error) {
     console.error('Error fetching existing events:', error);
