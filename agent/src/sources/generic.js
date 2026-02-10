@@ -100,9 +100,19 @@ export async function scrapeGeneric(sourceConfig) {
     console.error(`Error scraping ${sourceConfig.id}:`, error.message);
   }
 
+  // Filter out past events (only when start_time is parseable)
+  const now = new Date();
+  const upcoming = events.filter(e => {
+    if (e.start_time) {
+      const eventDate = new Date(e.start_time);
+      if (!isNaN(eventDate) && eventDate < now) return false;
+    }
+    return true;
+  });
+
   // Dedupe by URL
   const seen = new Set();
-  return events.filter(e => {
+  return upcoming.filter(e => {
     if (seen.has(e.url)) return false;
     seen.add(e.url);
     return true;

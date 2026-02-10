@@ -14,6 +14,15 @@ export interface StewardshipEntry {
 
 export const stewardshipLog: StewardshipEntry[] = [
   {
+    id: 'scraper-freshness',
+    date: '2026-02-10',
+    title: 'Scraper Freshness & Per-Source Observability',
+    problem: 'Agent returned the same 54 events every run for 7+ days. Two scrapers (generic.js, websearch.js) had no past-event filtering, continuously returning stale events. All scrapers silently returned empty arrays on failure with no way to detect which sources were broken.',
+    action: 'Added past-event filtering to generic.js and websearch.js. Added per-source event count tracking to the pipeline with console warnings when a source returns 0 events. Storing per-source results in agent_runs for persistent observability.',
+    result: 'Stale events filtered at the scraper level. Silent scraper failures now visible in logs and stored in the database for Observatory consumption.',
+    category: 'optimization',
+  },
+  {
     id: 'phantom-accepted-fix',
     date: '2026-02-10',
     title: 'Fix Phantom "Accepted" Events in Agent Runs',

@@ -163,9 +163,19 @@ export async function searchEvents(runStats = null) {
     }
   }
 
+  // Filter out past events (only when start_time is parseable)
+  const now = new Date();
+  const upcoming = events.filter(e => {
+    if (e.start_time) {
+      const eventDate = new Date(e.start_time);
+      if (!isNaN(eventDate) && eventDate < now) return false;
+    }
+    return true;
+  });
+
   // Dedupe by URL
   const seen = new Set();
-  const dedupedEvents = events.filter(e => {
+  const dedupedEvents = upcoming.filter(e => {
     if (seen.has(e.url)) return false;
     seen.add(e.url);
     return true;

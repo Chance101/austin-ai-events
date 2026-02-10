@@ -280,6 +280,14 @@ async function discoverEvents() {
 
       console.log(`    Found ${events.length} events`);
 
+      // Track per-source results for observability
+      if (!runStats.sourceResults) runStats.sourceResults = [];
+      runStats.sourceResults.push({ name: source.name, url: source.url, events: events.length });
+
+      if (events.length === 0) {
+        console.warn(`    ⚠️  ${source.name} returned 0 events — may be silently failing`);
+      }
+
       // Attach source metadata to each event for conditional validation
       events.forEach(e => {
         e._sourceUrl = source.url;

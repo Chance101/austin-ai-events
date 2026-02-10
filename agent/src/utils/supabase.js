@@ -89,6 +89,7 @@ export async function logAgentRun(stats) {
       error_messages: stats.errorMessages,
       claude_api_calls: stats.claudeApiCalls,
       serpapi_calls: stats.serpapiCalls,
+      source_results: stats.sourceResults || [],
     });
 
   if (error) {
