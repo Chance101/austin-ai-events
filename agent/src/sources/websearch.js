@@ -61,19 +61,25 @@ async function fetchEventDetails(url) {
 
 /**
  * Search for AI events in Austin using SerpAPI
+ * @param {string[]} queries - Search queries to run
  * @param {Object} runStats - Optional run stats object for tracking API calls
  * @returns {Object} Object with events array and serpapiCalls count
  */
-export async function searchEvents(runStats = null) {
+export async function searchEvents(queries = [], runStats = null) {
   if (!config.serpApiKey) {
     console.log('SerpAPI key not configured, skipping web search');
+    return { events: [], serpapiCalls: 0 };
+  }
+
+  if (queries.length === 0) {
+    console.log('No search queries provided, skipping web search');
     return { events: [], serpapiCalls: 0 };
   }
 
   const events = [];
   let serpapiCalls = 0;
 
-  for (const query of config.searchQueries) {
+  for (const query of queries) {
     try {
       const results = await getJson({
         api_key: config.serpApiKey,

@@ -10,7 +10,7 @@ import { scrapeLeadersInAI } from './sources/leadersinai.js';
 import { validateEvent, classifyEvent, extractLocationFromImage } from './utils/claude.js';
 import { findDuplicates, getEventHash } from './utils/dedup.js';
 import { upsertEvent, getExistingEvents, logAgentRun } from './utils/supabase.js';
-import { discoverSources, getTrustedSources, getProbationSources, updateSourceStats, updateSourceValidationStats } from './discovery/sourceDiscovery.js';
+import { discoverSources, getTrustedSources, getProbationSources, updateSourceStats, updateSourceValidationStats, getEventSearchQueries } from './discovery/sourceDiscovery.js';
 import { analyzeUnprocessedFeedback } from './feedback/analyzeFeedback.js';
 
 /**
@@ -312,7 +312,9 @@ async function discoverEvents() {
   // 2. Web search for additional events
   console.log('\n🔍 Searching web for additional events...');
   try {
-    const { events: searchResults, serpapiCalls } = await searchEvents(runStats);
+    const eventQueries = await getEventSearchQueries(2);
+    console.log(`  Using ${eventQueries.length} search queries`);
+    const { events: searchResults, serpapiCalls } = await searchEvents(eventQueries, runStats);
     console.log(`  Found ${searchResults.length} potential events from web search`);
     allDiscoveredEvents.push(...searchResults);
     runStats.serpapiCalls += serpapiCalls || 0;

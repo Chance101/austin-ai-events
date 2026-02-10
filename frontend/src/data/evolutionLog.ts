@@ -14,6 +14,15 @@ export interface StewardshipEntry {
 
 export const stewardshipLog: StewardshipEntry[] = [
   {
+    id: 'web-search-enabled',
+    date: '2026-02-10',
+    title: 'Enable Web Search for Event Discovery',
+    problem: 'Web event search was completely disabled — config.searchQueries was an empty array. The only events came from 8 hardcoded scrapers, with no secondary discovery channel. Source discovery used all 5 daily SerpAPI calls searching for listing pages, not individual events.',
+    action: 'Connected searchEvents() to the search_queries DB table instead of the empty config array. Split SerpAPI budget: 3 calls for source discovery, 2 for direct event search using least-recently-run queries for rotation.',
+    result: 'Agent now has a second discovery channel for finding individual events via web search, using the same managed query pool with priority decay and rotation.',
+    category: 'capability',
+  },
+  {
     id: 'scraper-freshness',
     date: '2026-02-10',
     title: 'Scraper Freshness & Per-Source Observability',

@@ -52,24 +52,25 @@ export async function recalculatePriorityScores() {
 
 /**
  * Fetch queries using exploration budget strategy:
- * - 3 queries: highest priority_score (exploitation)
- * - 1 query: lowest priority_score among active (exploration)
- * - 1 query: most recent unrun agent-generated query OR second-lowest priority (experimentation)
+ * - Up to 3 queries: highest priority_score (exploitation)
+ * - 1 query: lowest priority_score among active (exploration) — if limit > 3
+ * - 1 query: most recent unrun agent-generated query OR second-lowest priority — if limit > 4
  */
-export async function getActiveQueries(limit = 5) {
+export async function getActiveQueries(limit = 3) {
   // First, recalculate all priority scores
   await recalculatePriorityScores();
 
   const selectedQueries = [];
   const selectedIds = new Set();
 
-  // 1. Get top 3 highest priority queries (exploitation)
+  // 1. Get top queries by priority (exploitation)
+  const exploitCount = Math.min(limit, 3);
   const { data: highPriority, error: highError } = await supabase
     .from('search_queries')
     .select('*')
     .eq('is_active', true)
     .order('priority_score', { ascending: false })
-    .limit(3);
+    .limit(exploitCount);
 
   if (highError) {
     console.error('Error fetching high priority queries:', highError.message);
@@ -79,6 +80,11 @@ export async function getActiveQueries(limit = 5) {
   for (const q of (highPriority || [])) {
     selectedQueries.push(q);
     selectedIds.add(q.id);
+  }
+
+  if (selectedQueries.length >= limit) {
+    console.log(`    Selected ${selectedQueries.length} queries using exploration budget`);
+    return selectedQueries;
   }
 
   // 2. Get lowest priority query (exploration)
@@ -98,6 +104,11 @@ export async function getActiveQueries(limit = 5) {
         break;
       }
     }
+  }
+
+  if (selectedQueries.length >= limit) {
+    console.log(`    Selected ${selectedQueries.length} queries using exploration budget`);
+    return selectedQueries;
   }
 
   // 3. Get experimental query: unrun agent-generated OR second-lowest priority
@@ -470,7 +481,7 @@ export async function discoverSources(runStats = null) {
   };
 
   // Get active queries and known sources
-  const queries = await getActiveQueries(5);
+  const queries = await getActiveQueries(3);
   const knownUrls = await getKnownSourceUrls();
   const discoveredSources = [];
 
@@ -665,6 +676,25 @@ function shouldSkipUrl(url) {
 
   const lowerUrl = url.toLowerCase();
   return skipPatterns.some(pattern => lowerUrl.includes(pattern));
+}
+
+/**
+ * Get search queries for direct event searching (not source discovery).
+ * Selects queries by oldest last_run to ensure rotation across runs.
+ */
+export async function getEventSearchQueries(limit = 2) {
+  const { data, error } = await supabase
+    .from('search_queries')
+    .select('query_text')
+    .eq('is_active', true)
+    .order('last_run', { ascending: true, nullsFirst: true })
+    .limit(limit);
+
+  if (error) {
+    console.error('Error fetching event search queries:', error.message);
+    return [];
+  }
+  return (data || []).map(q => q.query_text);
 }
 
 /**

@@ -88,14 +88,6 @@ export const config = {
     //   type: 'scrape',
     // },
   ],
-
-  // Web search queries for discovering new events
-  // Disabled for initial testing - enable later
-  searchQueries: [
-    // 'Austin AI meetup events',
-    // 'Austin machine learning events',
-    // 'Austin LLM workshop',
-  ],
 };
 
 // Validate required config
