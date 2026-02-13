@@ -14,6 +14,15 @@ export interface StewardshipEntry {
 
 export const stewardshipLog: StewardshipEntry[] = [
   {
+    id: 'pipeline-false-negatives',
+    date: '2026-02-12',
+    title: 'Fix Pipeline False Negatives & Scraper Noise',
+    problem: 'For 10+ days, agent reported "2 accepted" daily but no new events reached the calendar. Root cause: checkAustinLocation() was returning false (reject) instead of null (uncertain) for events with location data that didn\'t match hardcoded Austin indicators — blocking legitimate Austin events from trusted sources without Claude verification. Additionally, AI Accelerator scraper was returning ~21 non-Austin events per day (Boston, NY, London) that passed through to the pipeline, wasting processing. Three sources (HackAI, Austin Forum, Leaders in AI) silently returning 0 events.',
+    action: 'Changed checkAustinLocation() to return null (needs verification) instead of false for ambiguous locations — only returns false when a non-Austin city is positively identified. Added title to the location check (catches "ATX", "SXSW" in event names). Expanded Austin indicators with 15+ new entries (atx, sxsw, south lamar, mueller, zilker, congress ave, etc.). Fixed AI Accelerator scraper: added Austin filtering at scraper level, removed false "Austin" default for venue_name, fixed source_event_id extraction for trailing-slash URLs. Added diagnostic logging to all 3 dead sources.',
+    result: 'Ambiguous events now go to Claude for verification instead of being silently rejected. AI Accelerator scraper filters non-Austin events before they enter the pipeline. Dead source diagnostics will appear in next run\'s logs.',
+    category: 'learning',
+  },
+  {
     id: 'web-search-enabled',
     date: '2026-02-10',
     title: 'Enable Web Search for Event Discovery',

@@ -57,10 +57,13 @@ function mapSourceType(dbType) {
 /**
  * Quick sanity check for Austin location - runs for ALL events regardless of trust tier
  * This is a fast string-based check that doesn't require Claude API calls
- * Returns: { isAustin: boolean, reason: string }
+ * Returns: { isAustin: true/false/null, reason: string }
+ *   true  = definitely Austin (matched Austin indicator)
+ *   false = definitely NOT Austin (matched non-Austin city)
+ *   null  = uncertain (no match either way, needs Claude verification)
  */
 function checkAustinLocation(event) {
-  const venueOrAddress = [event.venue_name, event.address, event.location]
+  const venueOrAddress = [event.venue_name, event.address, event.location, event.title]
     .filter(Boolean)
     .join(' ')
     .toLowerCase();
@@ -85,12 +88,16 @@ function checkAustinLocation(event) {
 
   // Austin area indicators
   const austinIndicators = [
-    'austin', 'tx 78', '787', 'travis county', 'williamson county',
+    'austin', 'atx', 'tx 78', '787', 'travis county', 'williamson county',
     'hays county', 'round rock', 'cedar park', 'pflugerville',
     'leander', 'georgetown', 'dripping springs', 'lakeway', 'bee cave',
     'capital factory', 'domain', 'downtown austin', 'south congress',
     'east austin', 'soco', '6th street', 'rainey street', 'ut austin',
     'university of texas', 'acc ', 'st. edwards', 'concordia',
+    'sxsw', 'south lamar', 'mueller', 'zilker', 'shoal creek',
+    'south austin', 'north austin', 'west lake', 'westlake',
+    'brushy creek', 'jollyville', 'manor rd', 'burnet rd',
+    'south first', 'congress ave', 'lamar blvd',
   ];
 
   // If venue/address is provided, check for Austin indicators
@@ -100,8 +107,8 @@ function checkAustinLocation(event) {
         return { isAustin: true, reason: 'Location matches Austin area' };
       }
     }
-    // Has location data but no Austin match - suspicious
-    return { isAustin: false, reason: 'Location provided but no Austin indicators found' };
+    // Has location data but no definitive match either way - uncertain
+    return { isAustin: null, reason: 'Location provided but no Austin indicators found — needs verification' };
   }
 
   // No location data at all - will need Claude validation
@@ -413,8 +420,8 @@ async function discoverEvents() {
         validation = { isValid: false, confidence: 0.9, reason: locationCheck.reason };
         console.log(`  ❌ Trusted source but NOT Austin: ${event.title?.substring(0, 50)}... (${locationCheck.reason})`);
       } else if (isTrustedSource && locationCheck.isAustin === null) {
-        // Trusted source but no location data - need Claude to verify
-        console.log(`  🔍 Trusted source, no location - validating: ${event.title?.substring(0, 50)}...`);
+        // Trusted source but uncertain location - need Claude to verify
+        console.log(`  🔍 Trusted source, uncertain location - validating: ${event.title?.substring(0, 50)}... (${locationCheck.reason})`);
         validation = await validateEvent(event, runStats);
         runStats.claudeApiCalls++;
       } else {

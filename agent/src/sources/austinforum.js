@@ -34,6 +34,8 @@ export async function scrapeAustinForum(sourceConfig) {
       }
     });
 
+    console.log(`    [diag] Found ${eventbriteLinks.size} Eventbrite links on page, ${$('a').length} total links`);
+
     // For each unique Eventbrite link, try to fetch event details
     for (const eventUrl of eventbriteLinks) {
       try {

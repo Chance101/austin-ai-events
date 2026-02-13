@@ -54,6 +54,50 @@ const MONTH_MAP = {
   'december': 11, 'dec': 11,
 };
 
+// Non-Austin cities to filter out at scraper level
+const NON_AUSTIN_CITIES = [
+  'san antonio', 'houston', 'dallas', 'fort worth', 'san marcos',
+  'san francisco', 'los angeles', 'new york', 'chicago', 'seattle',
+  'denver', 'boston', 'atlanta', 'miami', 'phoenix', 'portland',
+  'washington dc', 'philadelphia', 'london', 'toronto', 'singapore',
+  'dubai', 'paris', 'berlin', 'sydney', 'mumbai', 'bangalore',
+];
+
+/**
+ * Check if an event location indicates Austin area
+ * Returns true (Austin), false (non-Austin), or null (uncertain)
+ */
+function isAustinEvent(title, location, address) {
+  const combined = [title, location, address].filter(Boolean).join(' ').toLowerCase();
+
+  // Check for non-Austin cities first
+  for (const city of NON_AUSTIN_CITIES) {
+    if (combined.includes(city)) {
+      return false;
+    }
+  }
+
+  // Check for Austin indicators
+  const austinIndicators = ['austin', 'atx', 'tx 78', '787', 'sxsw'];
+  for (const indicator of austinIndicators) {
+    if (combined.includes(indicator)) {
+      return true;
+    }
+  }
+
+  // Uncertain — no match either way
+  return null;
+}
+
+/**
+ * Normalize a URL and extract a stable source_event_id from its path
+ */
+function extractSourceEventId(url) {
+  if (!url) return null;
+  const cleaned = url.replace(/\/$/, '').split('?')[0];
+  return cleaned.split('/').filter(Boolean).pop() || null;
+}
+
 /**
  * Create a UTC date from Austin local time
  */
@@ -143,15 +187,21 @@ export async function scrapeAIAccelerator(sourceConfig) {
             return;
           }
 
+          // Filter to Austin events only — skip events from other cities
+          const austinCheck = isAustinEvent(title, location, null);
+          if (austinCheck === false) {
+            return; // Definitely not Austin
+          }
+
           events.push({
             title,
             description: null, // Would need to fetch individual event page
             url: eventUrl,
             source: sourceConfig.id,
-            source_event_id: eventUrl.split('/').pop() || null,
+            source_event_id: extractSourceEventId(eventUrl),
             start_time: startTime,
             end_time: null,
-            venue_name: location || 'Austin',
+            venue_name: location || null,
             address: null,
             is_free: null,
             organizer: sourceConfig.name,
@@ -177,16 +227,26 @@ export async function scrapeAIAccelerator(sourceConfig) {
             const jsonTitle = decodeHtmlEntities(item.name);
             if (isGarbageText(jsonTitle)) continue;
 
+            // Extract location details from JSON-LD
+            const venueName = item.location?.name || null;
+            const streetAddress = item.location?.address?.streetAddress;
+            const city = item.location?.address?.addressLocality;
+            const address = [streetAddress, city].filter(Boolean).join(', ') || null;
+
+            // Filter to Austin events only
+            const austinCheck = isAustinEvent(jsonTitle, venueName, address || city);
+            if (austinCheck === false) continue;
+
             events.push({
               title: jsonTitle,
               description: decodeHtmlEntities(item.description),
               url: item.url || sourceConfig.url,
               source: sourceConfig.id,
-              source_event_id: item.identifier || null,
+              source_event_id: item.identifier || extractSourceEventId(item.url),
               start_time: item.startDate,
               end_time: item.endDate || null,
-              venue_name: item.location?.name || 'Austin',
-              address: item.location?.address?.streetAddress,
+              venue_name: venueName,
+              address,
               is_free: item.isAccessibleForFree || item.offers?.[0]?.price === 0,
               organizer: sourceConfig.name,
               image_url: item.image,

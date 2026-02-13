@@ -37,8 +37,13 @@ export async function scrapeMeetup(sourceConfig) {
 
     if (!apolloState) {
       console.error('    Could not find Apollo state in page data');
+      console.log(`    [diag] __NEXT_DATA__ keys: ${Object.keys(nextData?.props?.pageProps || {}).join(', ')}`);
       return events;
     }
+
+    // Diagnostic: count Event keys in Apollo state
+    const eventKeys = Object.keys(apolloState).filter(k => k.startsWith('Event:'));
+    console.log(`    [diag] Apollo state has ${eventKeys.length} Event entries, ${Object.keys(apolloState).filter(k => k.startsWith('Venue:')).length} Venue entries`);
 
     // Extract the group name from Apollo state
     let groupName = sourceConfig.name; // fallback to config name

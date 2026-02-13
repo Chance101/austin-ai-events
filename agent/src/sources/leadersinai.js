@@ -51,6 +51,10 @@ export async function scrapeLeadersInAI(sourceConfig) {
     const html = await response.text();
     const $ = cheerio.load(html);
 
+    // Diagnostic logging
+    const jsonLdScripts = $('script[type="application/ld+json"]').length;
+    console.log(`    [diag] Found ${jsonLdScripts} JSON-LD scripts on page`);
+
     // Check for JSON-LD
     $('script[type="application/ld+json"]').each((_, script) => {
       try {
@@ -103,6 +107,8 @@ export async function scrapeLeadersInAI(sourceConfig) {
       }
 
       const venueMatch = pageText.match(/Omni\s+Austin\s+Hotel\s+Downtown/i);
+
+      console.log(`    [diag] Date pattern found: ${dateMatch ? dateMatch[0] : 'none'}, venue found: ${!!venueMatch}`);
 
       if (dateMatch) {
         // Use parsed year or fall back to upcoming February year
