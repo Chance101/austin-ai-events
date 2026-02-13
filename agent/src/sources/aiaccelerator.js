@@ -155,7 +155,19 @@ export async function scrapeAIAccelerator(sourceConfig) {
         }
 
         const dateText = $el.find('[class*="eventDate"]').text().trim();
-        const location = $el.find('[class*="eventLocation"], [class*="eventCity"]').text().trim();
+        // Extract location using direct text nodes only (avoid nested <style> tags)
+        const $locationEl = $el.find('[class*="eventLocation"], [class*="eventCity"]').first();
+        let location = '';
+        $locationEl.contents().each((_, node) => {
+          if (node.type === 'text') {
+            location += $(node).text();
+          }
+        });
+        location = location.trim();
+        // Discard location if it looks like CSS/code (defense-in-depth)
+        if (isGarbageText(location)) {
+          location = '';
+        }
 
         // Skip garbage titles (CSS, HTML, code)
         if (isGarbageText(title)) {

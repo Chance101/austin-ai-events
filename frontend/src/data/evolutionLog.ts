@@ -14,6 +14,15 @@ export interface StewardshipEntry {
 
 export const stewardshipLog: StewardshipEntry[] = [
   {
+    id: 'css-location-repackaged-dedup',
+    date: '2026-02-12',
+    title: 'Fix CSS in Location Field & Repackaged Conference Dedup',
+    problem: 'AI Accelerator scraper was extracting CSS from nested <style> tags into the location field, displaying raw CSS on event cards. Also, the same organization was listing the same conference under 5-7 different track names (e.g., "Sales Enablement Summit Austin", "Customer Success Summit Austin", "Product-Led Summit Austin") — all same day, same venue — taking multiple calendar spots for one event.',
+    action: 'Fixed location extraction to use direct text nodes only (same pattern as prior title fix). Added isGarbageText() check on extracted location as defense-in-depth. Added same-source-same-day dedup check: when events share a source and date, Claude determines if they\'re the same conference repackaged. Created migration to clean existing CSS-polluted location data.',
+    result: 'Location fields display cleanly. Repackaged conferences detected as duplicates — only the first track gets a calendar spot.',
+    category: 'learning',
+  },
+  {
     id: 'pipeline-false-negatives',
     date: '2026-02-12',
     title: 'Fix Pipeline False Negatives & Scraper Noise',

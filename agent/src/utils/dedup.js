@@ -66,6 +66,33 @@ export async function findDuplicates(newEvent, existingEvents, runStats = null) 
     }
   }
 
+  // Check for repackaged events: same source + same day = likely same conference
+  // with different track names (e.g., "Sales Summit Austin" / "Customer Success Summit Austin")
+  if (newEvent.source && newDate) {
+    const sameSourceSameDay = existingEvents.filter(existing => {
+      if (!existing.source || !existing.start_time) return false;
+      if (existing.source !== newEvent.source) return false;
+      const existingDate = parseISO(existing.start_time);
+      return isSameDay(newDate, existingDate);
+    });
+
+    for (const candidate of sameSourceSameDay.slice(0, 3)) {
+      try {
+        const result = await checkDuplicate(newEvent, candidate, runStats);
+        if (runStats) runStats.claudeApiCalls++;
+        if (result.isDuplicate && result.confidence > 0.7) {
+          return {
+            existingEvent: candidate,
+            confidence: result.confidence,
+            reason: `Same source, same day: ${result.reason}`,
+          };
+        }
+      } catch (error) {
+        console.error('Error checking same-source duplicate:', error);
+      }
+    }
+  }
+
   // First pass: fuzzy title matching
   const fuse = new Fuse(existingEvents, {
     keys: ['title'],
