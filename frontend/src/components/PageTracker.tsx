@@ -12,6 +12,12 @@ export default function PageTracker({ page }: PageTrackerProps) {
   useEffect(() => {
     if (tracked) return;
 
+    // Skip if already tracked in the last 24 hours
+    if (document.cookie.includes('_pv_tracked=1')) {
+      setTracked(true);
+      return;
+    }
+
     const trackVisit = async () => {
       try {
         await fetch('/api/track', {
@@ -19,6 +25,8 @@ export default function PageTracker({ page }: PageTrackerProps) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ page }),
         });
+        // Set 24-hour cookie to prevent re-tracking
+        document.cookie = '_pv_tracked=1; max-age=86400; path=/; SameSite=Lax';
       } catch {
         // Silent fail
       }

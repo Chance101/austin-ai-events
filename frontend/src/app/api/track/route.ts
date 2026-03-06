@@ -23,6 +23,7 @@ const AI_BOT_PATTERNS = [
 
 // General bot patterns (search engines, etc.)
 const BOT_PATTERNS = [
+  /HeadlessChrome/i,
   /bot/i,
   /crawl/i,
   /spider/i,
@@ -92,13 +93,12 @@ export async function POST(request: NextRequest) {
       user_agent: userAgent,
     });
 
-    // Get counts for this page
-    const { count: humanCount } = await supabase
-      .from('page_views')
-      .select('*', { count: 'exact', head: true })
-      .eq('page', page)
-      .eq('visitor_type', 'human');
+    // Get deduplicated human count (unique user_agent per day)
+    const { data: humanData } = await supabase
+      .rpc('get_unique_visitor_count', { p_page: page, p_type: 'human' });
+    const humanCount = humanData ?? 0;
 
+    // Bot count stays as raw count (bots use distinct UAs, count is accurate)
     const { count: botCount } = await supabase
       .from('page_views')
       .select('*', { count: 'exact', head: true })
@@ -106,7 +106,7 @@ export async function POST(request: NextRequest) {
       .eq('visitor_type', 'bot');
 
     return NextResponse.json({
-      humanCount: humanCount || 0,
+      humanCount,
       botCount: botCount || 0,
       visitorType,
       isAI: isAIBot(userAgent),
@@ -126,13 +126,12 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Page is required' }, { status: 400 });
     }
 
-    // Get counts for this page
-    const { count: humanCount } = await supabase
-      .from('page_views')
-      .select('*', { count: 'exact', head: true })
-      .eq('page', page)
-      .eq('visitor_type', 'human');
+    // Get deduplicated human count (unique user_agent per day)
+    const { data: humanData } = await supabase
+      .rpc('get_unique_visitor_count', { p_page: page, p_type: 'human' });
+    const humanCount = humanData ?? 0;
 
+    // Bot count stays as raw count (accurate)
     const { count: botCount } = await supabase
       .from('page_views')
       .select('*', { count: 'exact', head: true })
@@ -140,7 +139,7 @@ export async function GET(request: NextRequest) {
       .eq('visitor_type', 'bot');
 
     return NextResponse.json({
-      humanCount: humanCount || 0,
+      humanCount,
       botCount: botCount || 0,
     });
   } catch (error) {
