@@ -573,6 +573,22 @@ export async function discoverSources(runStats = null) {
   // Learning loop: suggest new queries
   console.log('\n  🧠 Learning loop: generating new queries...');
 
+  // Recycle stale queries before checking the cap
+  const { data: staleQueries } = await supabase
+    .from('search_queries')
+    .select('id, query_text')
+    .eq('is_active', true)
+    .eq('created_by', 'agent')
+    .lte('priority_score', 0.05)
+    .gte('times_run', 10);
+
+  if (staleQueries?.length > 0) {
+    for (const q of staleQueries) {
+      await supabase.from('search_queries').update({ is_active: false }).eq('id', q.id);
+    }
+    console.log(`    Recycled ${staleQueries.length} stale queries`);
+  }
+
   // Check total active queries before adding more
   const { count: activeQueryCount } = await supabase
     .from('search_queries')
@@ -687,6 +703,7 @@ export async function getEventSearchQueries(limit = 2) {
     .from('search_queries')
     .select('query_text')
     .eq('is_active', true)
+    .eq('query_type', 'event_search')
     .order('last_run', { ascending: true, nullsFirst: true })
     .limit(limit);
 

@@ -14,6 +14,15 @@ export interface StewardshipEntry {
 
 export const stewardshipLog: StewardshipEntry[] = [
   {
+    id: 'autonomous-discovery-loop',
+    date: '2026-03-05',
+    title: 'Close the Autonomous Discovery Loop',
+    problem: 'Monitor graded the system a C with 22 empty days. The query table was full of stale queries (50/50 cap), blocking new query creation. The monitor could only create event-search queries, not source-discovery queries, so it couldn\'t trigger the discovery of new Meetup groups and event sources.',
+    action: 'Added smart query recycling: stale queries (priority <= 0.05, 10+ runs, agent-created) are automatically deactivated before the cap check in both the discovery system and the monitor. Added a new monitor auto-action type "create_source_query" that inserts queries with query_type "source_discovery" so the discovery system picks them up on the next run. This closes the loop: monitor detects coverage gaps, creates targeted source-discovery queries, next run finds new Meetup groups/sources, adds them as probation, scrapes them, events flow to calendar.',
+    result: 'The monitor can now autonomously drive source discovery when it detects coverage gaps, instead of being blocked by stale queries. The discovery pipeline is unblocked and self-healing.',
+    category: 'capability',
+  },
+  {
     id: 'self-monitoring-agent',
     date: '2026-03-05',
     title: 'Self-Monitoring Agent with Auto-Fix',

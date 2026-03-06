@@ -118,7 +118,8 @@ austin-ai-events/
         ├── 003_source_trust_tiers.sql  # Trust tier columns for sources table
         ├── 003_data_cleanup.sql        # Initialize trust tiers for existing data
         ├── 004_source_results.sql      # Per-source results JSONB on agent_runs
-        └── 005_monitor_reports.sql     # Self-monitoring health reports table
+        ├── 005_monitor_reports.sql     # Self-monitoring health reports table
+        └── 007_add_meetup_enum.sql     # Add 'meetup' event_source enum value
 ```
 
 ## Key Database Schema
@@ -276,10 +277,18 @@ The monitor (`agent/src/monitor.js`) runs automatically as the final phase of ev
 4. Executes safe auto-actions (max 3 per run), stores report in `monitor_reports` table
 
 **Auto-actions (safe, reversible):**
-- `create_query`: Add new search queries when coverage gaps detected
+- `create_query`: Add new event-search queries when coverage gaps detected
+- `create_source_query`: Add source-discovery queries to find new listing pages/Meetup groups
+  (inserted with `query_type: 'source_discovery'`, picked up by next discovery run)
 - `deactivate_query`: Remove stale queries with low priority
 - `boost_query`: Increase priority for productive queries
 - `flag_source`: Log concern about a source (no destructive action)
+
+**Monitor → Discovery handoff:**
+When the monitor detects coverage gaps, it creates `create_source_query` actions targeting new event sources (e.g., "Austin AI meetup groups site:meetup.com"). These are inserted into `search_queries` with `query_type: 'source_discovery'` and `priority_score: 1.0`. On the next agent run, `discoverSources()` picks them up and searches for new listing pages, closing the autonomous discovery loop.
+
+**Smart query recycling:**
+Both the discovery system and the monitor automatically deactivate stale queries (priority <= 0.05, 10+ runs, agent-created) before checking the 50-query cap. This prevents the query table from filling up with dead queries and blocking new discoveries.
 
 **What requires human intervention:**
 - Broken scrapers (HTML structure changes)

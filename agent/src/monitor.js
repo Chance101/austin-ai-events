@@ -205,7 +205,7 @@ Evaluate the system across these dimensions and respond with ONLY valid JSON (no
   ],
   "auto_actions": [
     {
-      "type": "deactivate_query|create_query|boost_query|flag_source",
+      "type": "deactivate_query|create_query|create_source_query|boost_query|flag_source",
       "detail": "Specific action description",
       "query_text": "for query actions, the query string",
       "source_url": "for source actions, the URL",
@@ -234,7 +234,11 @@ Evaluate the system across these dimensions and respond with ONLY valid JSON (no
 ## Guidelines for auto_actions (CONSERVATIVE)
 - Only suggest auto-actions that are safe and reversible
 - deactivate_query: for queries with very low priority that haven't found anything useful
-- create_query: when there's a clear coverage gap (e.g., no events for upcoming weeks)
+- create_query: when there's a clear coverage gap and you want to find individual events directly
+- create_source_query: when coverage gaps suggest we need to find NEW listing pages/event sources
+  (e.g., "Austin AI meetup groups site:meetup.com", "Austin machine learning events calendar")
+  These target source discovery — finding new recurring event pages, not individual events.
+  Use this when the system needs more sources, not just more searches for one-off events.
 - boost_query: when a query type has been productive but priority decayed
 - flag_source: when a source has been consistently failing (do NOT suggest removing — just flag)
 - Maximum 3 auto-actions per evaluation
@@ -285,8 +289,11 @@ async function executeAutoActions(actions) {
           break;
         }
 
+        case 'create_source_query':
         case 'create_query': {
           if (!action.query_text) break;
+          const isSourceQuery = action.type === 'create_source_query';
+          const queryType = isSourceQuery ? 'source_discovery' : 'event_search';
           // Check if query already exists
           const { data: existing } = await supabase
             .from('search_queries')
@@ -295,11 +302,25 @@ async function executeAutoActions(actions) {
             .limit(1);
           if (existing && existing.length > 0) {
             results.push({
-              action: 'create_query',
+              action: action.type,
               detail: action.query_text,
               result: 'Skipped (already exists)',
             });
             break;
+          }
+          // Recycle stale queries before checking the cap
+          const { data: staleQueries } = await supabase
+            .from('search_queries')
+            .select('id, query_text')
+            .eq('is_active', true)
+            .eq('created_by', 'agent')
+            .lte('priority_score', 0.05)
+            .gte('times_run', 10);
+          if (staleQueries?.length > 0) {
+            for (const q of staleQueries) {
+              await supabase.from('search_queries').update({ is_active: false }).eq('id', q.id);
+            }
+            console.log(`    Recycled ${staleQueries.length} stale queries to make room`);
           }
           // Check active query count
           const { count } = await supabase
@@ -308,7 +329,7 @@ async function executeAutoActions(actions) {
             .eq('is_active', true);
           if (count >= 50) {
             results.push({
-              action: 'create_query',
+              action: action.type,
               detail: action.query_text,
               result: 'Skipped (at 50 query cap)',
             });
@@ -318,14 +339,14 @@ async function executeAutoActions(actions) {
             .from('search_queries')
             .insert({
               query_text: action.query_text,
-              query_type: 'event_search',
-              priority_score: 0.7,
+              query_type: queryType,
+              priority_score: isSourceQuery ? 1.0 : 0.7,
               is_active: true,
             });
           results.push({
-            action: 'create_query',
+            action: action.type,
             detail: action.query_text,
-            result: error ? `Failed: ${error.message}` : 'Created',
+            result: error ? `Failed: ${error.message}` : `Created (${queryType})`,
           });
           break;
         }
