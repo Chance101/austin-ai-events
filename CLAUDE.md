@@ -42,7 +42,7 @@ npm run test                  # Run tests (Node.js native test runner)
 
 ### Data Flow
 1. **Scheduled Trigger**: GitHub Actions runs daily at 6 AM UTC (midnight CST)
-2. **Discovery**: Agent scrapes 8 event sources (Meetup, Lu.ma, etc.) and performs web search
+2. **Discovery**: Agent scrapes 11 event sources (Meetup, Lu.ma, AICamp, Capital Factory, UT Austin, etc.) and performs web search
 3. **Validation**: Each event sent to Claude API for verification (AI-related? Austin-based? Upcoming?)
 4. **Deduplication**: 3-layer approach:
    - URL hash check (quick)
@@ -93,6 +93,9 @@ austin-ai-events/
 │   │   │   ├── aiaccelerator.js       # AI Accelerator Institute
 │   │   │   ├── austinai.js            # Austin AI Alliance
 │   │   │   ├── leadersinai.js         # Leaders in AI Summit
+│   │   │   ├── aicamp.js              # AICamp Austin meetups
+│   │   │   ├── capitalfactory.js      # Capital Factory tech hub
+│   │   │   ├── utaustin.js            # UT Austin AI research events
 │   │   │   └── websearch.js           # SerpAPI + event enrichment
 │   │   ├── utils/
 │   │   │   ├── claude.js              # Claude API calls (validation, classification)

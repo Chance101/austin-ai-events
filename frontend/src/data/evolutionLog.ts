@@ -14,6 +14,15 @@ export interface StewardshipEntry {
 
 export const stewardshipLog: StewardshipEntry[] = [
   {
+    id: 'enable-three-sources',
+    date: '2026-03-05',
+    title: 'Enable AICamp, Capital Factory & UT Austin AI Sources',
+    problem: 'Three event sources (AICamp, Capital Factory, UT Austin AI) were disabled since project inception because they needed custom scrapers. This meant missing AI meetups, tech hub events, and university research talks — all happening in Austin.',
+    action: 'Built custom scrapers for each source: AICamp scraper fetches the global events page and filters for Austin events with detail page enrichment. UT Austin scraper parses server-rendered Drupal event listings with date/time/location extraction. Capital Factory uses a two-pronged approach — scrapes their HubSpot events page (info.capitalfactory.com/ic-events) for flagship events AND the Lu.ma Austin discover page filtered to events at Capital Factory venue (701 Brazos), catching community meetups hosted there. Updated config with correct URLs (AICamp URL had changed). Added all three to the scraper dispatch in index.js.',
+    result: 'Agent now scrapes 11 sources (up from 8). Capital Factory scraper is comprehensive — catches both CF-organized events and community events hosted at the venue via Lu.ma. AICamp and UT Austin return server-rendered content reliably.',
+    category: 'capability',
+  },
+  {
     id: 'css-location-repackaged-dedup',
     date: '2026-02-12',
     title: 'Fix CSS in Location Field & Repackaged Conference Dedup',

@@ -68,25 +68,27 @@ export const config = {
       url: 'https://www.leadersinaisummit.com/austin',
       type: 'leadersinai',
     },
-    // Disabled for now - need custom scrapers
-    // {
-    //   id: 'aicamp',
-    //   name: 'AICamp',
-    //   url: 'https://www.aicamp.ai/event/eventlist?city=Austin',
-    //   type: 'api',
-    // },
-    // {
-    //   id: 'capital-factory',
-    //   name: 'Capital Factory',
-    //   url: 'https://www.capitalfactory.com/events/',
-    //   type: 'scrape',
-    // },
-    // {
-    //   id: 'ut-austin',
-    //   name: 'UT Austin AI',
-    //   url: 'https://ai.utexas.edu/events',
-    //   type: 'scrape',
-    // },
+    // AICamp - global events page, scraper filters to Austin
+    {
+      id: 'aicamp',
+      name: 'AICamp',
+      url: 'https://www.aicamp.ai/event/events',
+      type: 'aicamp',
+    },
+    // Capital Factory - Austin tech hub (own events + Lu.ma events at CF venue)
+    {
+      id: 'capital-factory',
+      name: 'Capital Factory',
+      url: 'https://info.capitalfactory.com/ic-events',
+      type: 'capitalfactory',
+    },
+    // UT Austin AI - university research events
+    {
+      id: 'ut-austin',
+      name: 'UT Austin AI',
+      url: 'https://ai.utexas.edu/events',
+      type: 'utaustin',
+    },
   ],
 };
 

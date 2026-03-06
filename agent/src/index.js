@@ -7,6 +7,9 @@ import { scrapeAustinForum } from './sources/austinforum.js';
 import { scrapeAIAccelerator } from './sources/aiaccelerator.js';
 import { scrapeAustinAI } from './sources/austinai.js';
 import { scrapeLeadersInAI } from './sources/leadersinai.js';
+import { scrapeAICamp } from './sources/aicamp.js';
+import { scrapeCapitalFactory } from './sources/capitalfactory.js';
+import { scrapeUTAustin } from './sources/utaustin.js';
 import { validateEvent, classifyEvent, extractLocationFromImage } from './utils/claude.js';
 import { findDuplicates, getEventHash } from './utils/dedup.js';
 import { upsertEvent, getExistingEvents, logAgentRun } from './utils/supabase.js';
@@ -276,6 +279,15 @@ async function discoverEvents() {
           break;
         case 'leadersinai':
           events = await scrapeLeadersInAI(source);
+          break;
+        case 'aicamp':
+          events = await scrapeAICamp(source);
+          break;
+        case 'capitalfactory':
+          events = await scrapeCapitalFactory(source);
+          break;
+        case 'utaustin':
+          events = await scrapeUTAustin(source);
           break;
         case 'scrape':
         case 'api':
