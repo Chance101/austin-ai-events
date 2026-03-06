@@ -70,6 +70,7 @@ austin-ai-events/
 │   │   │   └── observatory/           # Three-layer observability dashboard
 │   │   │       ├── (Agent Performance) # LastRunCard, PerformanceChart, SystemHealth, etc.
 │   │   │       ├── (Under the Hood)    # SourceHealth, DecisionLog, CostTracking, ErrorLog
+│   │   │       ├── MonitorReport.tsx   # Self-evaluation health report display
 │   │   │       └── HumanStewardship.tsx # Human-AI collaboration log
 │   │   ├── data/
 │   │   │   └── evolutionLog.ts        # Stewardship entries (Problem → Action → Result)
@@ -101,6 +102,7 @@ austin-ai-events/
 │   │   │   ├── claude.js              # Claude API calls (validation, classification)
 │   │   │   ├── dedup.js               # Fuzzy matching + duplicate detection
 │   │   │   └── supabase.js            # Database operations
+│   │   ├── monitor.js                 # Self-monitoring agent (health reports + auto-fix)
 │   │   ├── discovery/
 │   │   │   └── sourceDiscovery.js     # Autonomous source discovery
 │   │   └── feedback/
@@ -115,7 +117,8 @@ austin-ai-events/
         ├── 002_agent_runs.sql
         ├── 003_source_trust_tiers.sql  # Trust tier columns for sources table
         ├── 003_data_cleanup.sql        # Initialize trust tiers for existing data
-        └── 004_source_results.sql      # Per-source results JSONB on agent_runs
+        ├── 004_source_results.sql      # Per-source results JSONB on agent_runs
+        └── 005_monitor_reports.sql     # Self-monitoring health reports table
 ```
 
 ## Key Database Schema
@@ -140,6 +143,7 @@ austin-ai-events/
   - `promoted_at`, `demoted_at`: Timestamps for tier changes
 - `search_queries`: Web search query logs (max 50 active, priority-based deactivation)
 - `daily_stats`: Aggregated metrics by date
+- `monitor_reports`: Self-evaluation health reports (grade, findings, auto-actions, metrics snapshot)
 
 ## Development Patterns
 
@@ -261,6 +265,29 @@ Search queries are managed in the `search_queries` table and used for two purpos
 - **Deactivation**: Queries with priority < 0.1 after 5+ runs are deactivated
 - **Priority decay**: Queries that don't find new sources decrease in priority
 - **Event search rotation**: Queries selected by oldest `last_run` to ensure diversity
+
+### Self-Monitoring Agent
+The monitor (`agent/src/monitor.js`) runs automatically as the final phase of every agent run. It evaluates overall system effectiveness and can take safe auto-actions.
+
+**How it works:**
+1. Gathers metrics from Supabase (run history, source performance, calendar coverage, query health)
+2. Sends all metrics to Claude for holistic evaluation
+3. Receives structured report: letter grade (A-F), categorized findings, and recommended auto-actions
+4. Executes safe auto-actions (max 3 per run), stores report in `monitor_reports` table
+
+**Auto-actions (safe, reversible):**
+- `create_query`: Add new search queries when coverage gaps detected
+- `deactivate_query`: Remove stale queries with low priority
+- `boost_query`: Increase priority for productive queries
+- `flag_source`: Log concern about a source (no destructive action)
+
+**What requires human intervention:**
+- Broken scrapers (HTML structure changes)
+- New scraper types for new platforms
+- Strategic decisions (expand scope, change validation criteria)
+- Validation prompt tuning
+
+**Run manually:** `cd agent && npm run monitor`
 
 ## Critical Implementation Details
 

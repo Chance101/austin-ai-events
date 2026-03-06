@@ -22,6 +22,7 @@ import DecisionLog from '@/components/observatory/DecisionLog';
 import CostTracking from '@/components/observatory/CostTracking';
 import ErrorLog from '@/components/observatory/ErrorLog';
 import HumanStewardship from '@/components/observatory/HumanStewardship';
+import MonitorReport, { MonitorReportData } from '@/components/observatory/MonitorReport';
 import PageTracker from '@/components/PageTracker';
 import { ThemeToggle } from '@/components/ThemeToggle';
 
@@ -41,6 +42,7 @@ export default function ObservatoryPage() {
   const [successfulRuns, setSuccessfulRuns] = useState(0);
   const [averageEventsPerRun, setAverageEventsPerRun] = useState(0);
   const [totalEventsAdded, setTotalEventsAdded] = useState(0);
+  const [monitorReport, setMonitorReport] = useState<MonitorReportData | null>(null);
 
   useEffect(() => {
     fetchAllData();
@@ -162,6 +164,15 @@ export default function ObservatoryPage() {
         .eq('errors', 0);
       setSuccessfulRuns(successfulRunsCount || 0);
 
+      // Fetch latest monitor report
+      const { data: monitorData } = await supabase
+        .from('monitor_reports')
+        .select('id, created_at, overall_grade, summary, findings, auto_actions')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+      setMonitorReport(monitorData);
+
       // Calculate average events per run and total events added
       const { data: allRunsData } = await supabase
         .from('agent_runs')
@@ -231,6 +242,18 @@ export default function ObservatoryPage() {
         <div className="mb-12">
           <HowItWorks />
         </div>
+
+        {/* ============================================ */}
+        {/* HEALTH REPORT */}
+        {/* ============================================ */}
+        <section className="mb-12">
+          <SectionHeader
+            title="Health Report"
+            subtitle="Automated self-evaluation of system effectiveness"
+            icon="🩺"
+          />
+          <MonitorReport report={monitorReport} loading={loading} />
+        </section>
 
         {/* ============================================ */}
         {/* SECTION 1: AGENT PERFORMANCE */}

@@ -15,6 +15,7 @@ import { findDuplicates, getEventHash } from './utils/dedup.js';
 import { upsertEvent, getExistingEvents, logAgentRun } from './utils/supabase.js';
 import { discoverSources, getTrustedSources, getProbationSources, updateSourceStats, updateSourceValidationStats, getEventSearchQueries } from './discovery/sourceDiscovery.js';
 import { analyzeUnprocessedFeedback } from './feedback/analyzeFeedback.js';
+import { runMonitor } from './monitor.js';
 
 /**
  * Create initial run stats object for tracking throughout the pipeline
@@ -551,7 +552,14 @@ async function discoverEvents() {
   }
 
   // 6. Log run to database
-  await logAgentRun(runStats);
+  const agentRunResult = await logAgentRun(runStats);
+
+  // 7. Run monitor evaluation
+  try {
+    await runMonitor(agentRunResult?.id || null);
+  } catch (error) {
+    console.error('Monitor evaluation failed:', error.message);
+  }
 
   return runStats;
 }

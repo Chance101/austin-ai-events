@@ -69,7 +69,7 @@ export async function logAgentRun(stats) {
   const now = new Date().toISOString();
   const runDuration = Math.round((Date.now() - stats.startTime) / 1000);
 
-  const { error } = await db
+  const { data, error } = await db
     .from('agent_runs')
     .insert({
       run_type: stats.runType,
@@ -90,11 +90,15 @@ export async function logAgentRun(stats) {
       claude_api_calls: stats.claudeApiCalls,
       serpapi_calls: stats.serpapiCalls,
       source_results: stats.sourceResults || [],
-    });
+    })
+    .select('id')
+    .single();
 
   if (error) {
     console.error('Failed to log agent run:', error.message);
-  } else {
-    console.log(`\n✅ Run logged to agent_runs table (${runDuration}s)`);
+    return null;
   }
+
+  console.log(`\n✅ Run logged to agent_runs table (${runDuration}s)`);
+  return data;
 }
