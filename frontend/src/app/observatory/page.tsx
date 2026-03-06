@@ -17,10 +17,8 @@ import PerformanceChart from '@/components/observatory/PerformanceChart';
 import SystemHealth from '@/components/observatory/SystemHealth';
 import VisitorCounter from '@/components/observatory/VisitorCounter';
 import SectionHeader from '@/components/observatory/SectionHeader';
-import SourceHealth from '@/components/observatory/SourceHealth';
 import DecisionLog from '@/components/observatory/DecisionLog';
 import CostTracking from '@/components/observatory/CostTracking';
-import ErrorLog from '@/components/observatory/ErrorLog';
 import HumanStewardship from '@/components/observatory/HumanStewardship';
 import MonitorReport, { MonitorReportData } from '@/components/observatory/MonitorReport';
 import PageTracker from '@/components/PageTracker';
@@ -32,7 +30,6 @@ export default function ObservatoryPage() {
   const [recentRuns, setRecentRuns] = useState<AgentRun[]>([]);
   const [recentEvents, setRecentEvents] = useState<Event[]>([]);
   const [totalSources, setTotalSources] = useState(0);
-  const [allSources, setAllSources] = useState<Source[]>([]);
   const [recentSources, setRecentSources] = useState<Source[]>([]);
   const [sourcesThisWeek, setSourcesThisWeek] = useState(0);
   const [topPerformingQueries, setTopPerformingQueries] = useState<SearchQuery[]>([]);
@@ -79,13 +76,6 @@ export default function ObservatoryPage() {
         .order('created_at', { ascending: false })
         .limit(20);
       setRecentEvents(eventsData || []);
-
-      // Fetch ALL sources with trust tier data
-      const { data: allSourcesData } = await supabase
-        .from('sources')
-        .select('*')
-        .order('created_at', { ascending: false });
-      setAllSources(allSourcesData || []);
 
       // Fetch total trusted sources (legacy query)
       const { count: sourcesCount } = await supabase
@@ -315,16 +305,10 @@ export default function ObservatoryPage() {
             icon="🔍"
           />
 
-          {/* Source Health + Decision Log */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-            <SourceHealth sources={allSources} loading={loading} />
-            <DecisionLog recentRuns={recentRuns} loading={loading} />
-          </div>
-
-          {/* Cost Tracking + Error Log */}
+          {/* Decision Log + Cost Tracking */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <DecisionLog recentRuns={recentRuns} loading={loading} />
             <CostTracking recentRuns={recentRuns} loading={loading} />
-            <ErrorLog recentRuns={recentRuns} loading={loading} />
           </div>
         </section>
 
