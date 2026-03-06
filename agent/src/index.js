@@ -400,6 +400,14 @@ async function discoverEvents() {
         continue;
       }
 
+      // Fuzzy dedup check BEFORE validation to avoid wasting Claude API calls
+      const duplicate = await findDuplicates(event, existingEvents, runStats);
+      if (duplicate) {
+        console.log(`  ⏭️  Duplicate of existing event: ${duplicate.reason}`);
+        runStats.duplicatesSkipped++;
+        continue;
+      }
+
       // If no venue/address but has image, try to extract location from image
       if (!event.venue_name && !event.address && event.image_url) {
         console.log(`    📷 No venue data - analyzing event image...`);
@@ -461,14 +469,6 @@ async function discoverEvents() {
       }
 
       runStats.eventsValidated++;
-
-      // Check for fuzzy duplicates
-      const duplicate = await findDuplicates(event, existingEvents, runStats);
-      if (duplicate) {
-        console.log(`    ⏭️  Duplicate of existing event: ${duplicate.reason}`);
-        runStats.duplicatesSkipped++;
-        continue;
-      }
 
       // Skip events without start_time (required field)
       if (!event.start_time) {

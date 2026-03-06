@@ -14,6 +14,15 @@ export interface StewardshipEntry {
 
 export const stewardshipLog: StewardshipEntry[] = [
   {
+    id: 'dedup-before-validation',
+    date: '2026-03-05',
+    title: 'Move Dedup Before Validation to Cut API Waste',
+    problem: 'Fuzzy duplicate detection ran after Claude validation, meaning ~80% of API calls were spent validating events already in the database. At 24 calls/run, ~19 were wasted on known duplicates.',
+    action: 'Moved the fuzzy dedup check (Fuse.js + Claude semantic analysis) to run immediately after URL hash dedup and before any Claude validation calls. Duplicates are now caught before entering the validation pipeline.',
+    result: 'Estimated ~80% reduction in unnecessary Claude API calls per run. Only genuinely new events reach validation and classification, improving both cost efficiency and pipeline clarity.',
+    category: 'optimization',
+  },
+  {
     id: 'autonomous-discovery-loop',
     date: '2026-03-05',
     title: 'Close the Autonomous Discovery Loop',

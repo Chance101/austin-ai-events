@@ -208,13 +208,13 @@ const response = await client.messages.create({
 2. **Pre-validation checks** (no Claude API cost):
    - `isMalformedTitle()`: Rejects CSS, HTML, code in titles
    - `checkAustinLocation()`: Fast string-based Austin location check for ALL events
-3. **Claude Validation**: Validates structure and event quality (confidence score >= 0.6)
-   - **Trusted/config sources skip validation only if Austin location is confirmed**
-   - Probation sources always validated
-4. **Deduplication**:
+3. **Deduplication** (before validation to save API costs):
    - URL hash lookup against existing events (includes past 30 days to prevent phantom re-adds)
    - Fuzzy match against existing events (Fuse.js with default threshold)
    - Claude semantic analysis for edge cases
+4. **Claude Validation**: Validates structure and event quality (confidence score >= 0.6)
+   - **Trusted/config sources skip validation only if Austin location is confirmed**
+   - Probation sources always validated
 5. **Classification**: Claude assigns audience and technical level
 6. **Upsert**: Insert or update in database, creating agent_run log entry
 
