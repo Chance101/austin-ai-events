@@ -24,6 +24,11 @@ const AI_BOT_PATTERNS = [
 // General bot patterns (search engines, etc.)
 const BOT_PATTERNS = [
   /HeadlessChrome/i,
+  /vercel-screenshot/i,
+  /Dataprovider/i,
+  /Manus-User/i,
+  /Konqueror/i,
+  /Nokia\d/i,
   /bot/i,
   /crawl/i,
   /spider/i,
