@@ -19,6 +19,7 @@ const AI_BOT_PATTERNS = [
   /Bytespider/i,
   /Amazonbot/i,
   /cohere-ai/i,
+  /Manus-User/i,
 ];
 
 // General bot patterns (search engines, etc.)
@@ -26,7 +27,6 @@ const BOT_PATTERNS = [
   /HeadlessChrome/i,
   /vercel-screenshot/i,
   /Dataprovider/i,
-  /Manus-User/i,
   /Konqueror/i,
   /Nokia\d/i,
   /bot/i,
@@ -103,16 +103,14 @@ export async function POST(request: NextRequest) {
       .rpc('get_unique_visitor_count', { p_page: page, p_type: 'human' });
     const humanCount = humanData ?? 0;
 
-    // Bot count stays as raw count (bots use distinct UAs, count is accurate)
-    const { count: botCount } = await supabase
-      .from('page_views')
-      .select('*', { count: 'exact', head: true })
-      .eq('page', page)
-      .eq('visitor_type', 'bot');
+    // AI crawler count only (excludes general bots like vercel-screenshot)
+    const { data: botData } = await supabase
+      .rpc('get_ai_crawler_count', { p_page: page });
+    const botCount = botData ?? 0;
 
     return NextResponse.json({
       humanCount,
-      botCount: botCount || 0,
+      botCount,
       visitorType,
       isAI: isAIBot(userAgent),
     });
@@ -136,16 +134,14 @@ export async function GET(request: NextRequest) {
       .rpc('get_unique_visitor_count', { p_page: page, p_type: 'human' });
     const humanCount = humanData ?? 0;
 
-    // Bot count stays as raw count (accurate)
-    const { count: botCount } = await supabase
-      .from('page_views')
-      .select('*', { count: 'exact', head: true })
-      .eq('page', page)
-      .eq('visitor_type', 'bot');
+    // AI crawler count only (excludes general bots like vercel-screenshot)
+    const { data: botData } = await supabase
+      .rpc('get_ai_crawler_count', { p_page: page });
+    const botCount = botData ?? 0;
 
     return NextResponse.json({
       humanCount,
-      botCount: botCount || 0,
+      botCount,
     });
   } catch (error) {
     console.error('Error getting counts:', error);

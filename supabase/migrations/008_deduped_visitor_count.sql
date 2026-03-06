@@ -8,3 +8,17 @@ RETURNS INTEGER AS $$
     WHERE page = p_page AND visitor_type = p_type
   ) d;
 $$ LANGUAGE SQL STABLE;
+
+-- Count only AI crawler visits (not general bots like vercel-screenshot)
+CREATE OR REPLACE FUNCTION get_ai_crawler_count(p_page TEXT)
+RETURNS INTEGER AS $$
+  SELECT COUNT(*)::INTEGER
+  FROM page_views
+  WHERE page = p_page
+    AND visitor_type = 'bot'
+    AND (
+      user_agent ~* 'GPTBot|ChatGPT|ClaudeBot|Claude-Web|Anthropic'
+      OR user_agent ~* 'Google-Extended|CCBot|PerplexityBot'
+      OR user_agent ~* 'Bytespider|Amazonbot|cohere-ai|Manus-User'
+    );
+$$ LANGUAGE SQL STABLE;
