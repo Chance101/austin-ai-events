@@ -244,18 +244,6 @@ export default function ObservatoryPage() {
         </div>
 
         {/* ============================================ */}
-        {/* HEALTH REPORT */}
-        {/* ============================================ */}
-        <section className="mb-12">
-          <SectionHeader
-            title="Health Report"
-            subtitle="Automated self-evaluation of system effectiveness"
-            icon="🩺"
-          />
-          <MonitorReport report={monitorReport} loading={loading} />
-        </section>
-
-        {/* ============================================ */}
         {/* SECTION 1: AGENT PERFORMANCE */}
         {/* ============================================ */}
         <section className="mb-12">
@@ -339,6 +327,18 @@ export default function ObservatoryPage() {
             <CostTracking recentRuns={recentRuns} loading={loading} />
             <ErrorLog recentRuns={recentRuns} loading={loading} />
           </div>
+        </section>
+
+        {/* ============================================ */}
+        {/* HEALTH REPORT */}
+        {/* ============================================ */}
+        <section className="mb-12">
+          <SectionHeader
+            title="Health Report"
+            subtitle="Automated self-evaluation of system effectiveness"
+            icon="🩺"
+          />
+          <MonitorReport report={monitorReport} loading={loading} />
         </section>
 
         {/* ============================================ */}
