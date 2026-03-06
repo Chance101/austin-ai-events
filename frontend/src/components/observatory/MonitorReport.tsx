@@ -1,6 +1,7 @@
 'use client';
 
-import { formatDistanceToNow } from 'date-fns';
+import { useState } from 'react';
+import { format, formatDistanceToNow } from 'date-fns';
 
 interface Finding {
   category: string;
@@ -25,7 +26,7 @@ export interface MonitorReportData {
 }
 
 interface MonitorReportProps {
-  report: MonitorReportData | null;
+  reports: MonitorReportData[];
   loading: boolean;
 }
 
@@ -81,63 +82,14 @@ function FindingCard({ finding }: { finding: Finding }) {
   );
 }
 
-export default function MonitorReport({ report, loading }: MonitorReportProps) {
-  if (loading) {
-    return (
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-        <div className="animate-pulse space-y-4">
-          <div className="h-6 bg-gray-200 dark:bg-gray-700 rounded w-1/3" />
-          <div className="h-16 bg-gray-200 dark:bg-gray-700 rounded" />
-          <div className="space-y-3">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="h-20 bg-gray-200 dark:bg-gray-700 rounded" />
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!report) {
-    return (
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Agent Health Report</h3>
-        <p className="text-gray-500 dark:text-gray-400 mt-2">No evaluation reports yet. The monitor runs automatically after each agent discovery run.</p>
-      </div>
-    );
-  }
-
-  const grade = gradeColors[report.overall_grade] || gradeColors.C;
-
-  // Sort findings: critical first, then warning, info, positive
+function ReportContent({ report }: { report: MonitorReportData }) {
   const severityOrder = { critical: 0, warning: 1, info: 2, positive: 3 };
   const sortedFindings = [...(report.findings || [])].sort(
     (a, b) => (severityOrder[a.severity] ?? 2) - (severityOrder[b.severity] ?? 2)
   );
 
-  const criticalCount = sortedFindings.filter(f => f.severity === 'critical').length;
-  const warningCount = sortedFindings.filter(f => f.severity === 'warning').length;
-  const positiveCount = sortedFindings.filter(f => f.severity === 'positive').length;
-
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-      {/* Header with grade */}
-      <div className="flex items-start justify-between mb-4">
-        <div>
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-            Agent Health Report
-          </h3>
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            {formatDistanceToNow(new Date(report.created_at), { addSuffix: true })}
-          </p>
-        </div>
-        <div className={`w-14 h-14 rounded-xl ${grade.bg} border-2 ${grade.border} flex items-center justify-center`}>
-          <span className={`text-2xl font-bold ${grade.text}`}>
-            {report.overall_grade}
-          </span>
-        </div>
-      </div>
-
+    <div>
       {/* Summary */}
       <p className="text-sm text-gray-700 dark:text-gray-300 mb-4 leading-relaxed">
         {report.summary}
@@ -145,21 +97,30 @@ export default function MonitorReport({ report, loading }: MonitorReportProps) {
 
       {/* Finding counts */}
       <div className="flex gap-3 mb-4">
-        {criticalCount > 0 && (
-          <span className="text-xs px-2 py-1 rounded-full bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 font-medium">
-            {criticalCount} critical
-          </span>
-        )}
-        {warningCount > 0 && (
-          <span className="text-xs px-2 py-1 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 font-medium">
-            {warningCount} warning{warningCount > 1 ? 's' : ''}
-          </span>
-        )}
-        {positiveCount > 0 && (
-          <span className="text-xs px-2 py-1 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 font-medium">
-            {positiveCount} positive
-          </span>
-        )}
+        {(() => {
+          const criticalCount = sortedFindings.filter(f => f.severity === 'critical').length;
+          const warningCount = sortedFindings.filter(f => f.severity === 'warning').length;
+          const positiveCount = sortedFindings.filter(f => f.severity === 'positive').length;
+          return (
+            <>
+              {criticalCount > 0 && (
+                <span className="text-xs px-2 py-1 rounded-full bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 font-medium">
+                  {criticalCount} critical
+                </span>
+              )}
+              {warningCount > 0 && (
+                <span className="text-xs px-2 py-1 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 font-medium">
+                  {warningCount} warning{warningCount > 1 ? 's' : ''}
+                </span>
+              )}
+              {positiveCount > 0 && (
+                <span className="text-xs px-2 py-1 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 font-medium">
+                  {positiveCount} positive
+                </span>
+              )}
+            </>
+          );
+        })()}
       </div>
 
       {/* Findings */}
@@ -186,6 +147,158 @@ export default function MonitorReport({ report, loading }: MonitorReportProps) {
             ))}
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+function formatReportDate(dateStr: string): string {
+  return format(new Date(dateStr), 'MMM d, yyyy');
+}
+
+function PastReportCard({ report, isExpanded, onToggle }: {
+  report: MonitorReportData;
+  isExpanded: boolean;
+  onToggle: () => void;
+}) {
+  const grade = gradeColors[report.overall_grade] || gradeColors.C;
+
+  return (
+    <div className="relative pl-8 pb-6 last:pb-0">
+      {/* Timeline line */}
+      <div className="absolute left-[11px] top-6 bottom-0 w-0.5 bg-gray-200 dark:bg-gray-700" />
+
+      {/* Timeline dot — grade colored */}
+      <div className={`absolute left-0 top-1.5 w-6 h-6 rounded-full ${grade.bg} border-2 ${grade.border} flex items-center justify-center text-xs font-bold ${grade.text} z-10`}>
+        {report.overall_grade}
+      </div>
+
+      <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+        {/* Header - always visible */}
+        <button
+          onClick={onToggle}
+          className="w-full p-4 text-left hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <div className="flex-1 min-w-0">
+              <div className="flex flex-wrap items-center gap-2 mb-1">
+                <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${grade.bg} ${grade.text} border ${grade.border}`}>
+                  Grade: {report.overall_grade}
+                </span>
+                <span className="text-xs text-gray-500 dark:text-gray-400">
+                  {formatReportDate(report.created_at)}
+                </span>
+              </div>
+              <p className="text-sm text-gray-700 dark:text-gray-300 truncate">
+                {report.summary}
+              </p>
+            </div>
+            <span className="text-gray-400 dark:text-gray-500 shrink-0">
+              {isExpanded ? '▼' : '▶'}
+            </span>
+          </div>
+        </button>
+
+        {/* Expanded content */}
+        {isExpanded && (
+          <div className="px-4 pb-4 border-t border-gray-200 dark:border-gray-700 pt-3">
+            <ReportContent report={report} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const REPORTS_PER_PAGE = 7;
+
+export default function MonitorReport({ reports, loading }: MonitorReportProps) {
+  const [visibleCount, setVisibleCount] = useState(REPORTS_PER_PAGE);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  if (loading) {
+    return (
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+        <div className="animate-pulse space-y-4">
+          <div className="h-6 bg-gray-200 dark:bg-gray-700 rounded w-1/3" />
+          <div className="h-16 bg-gray-200 dark:bg-gray-700 rounded" />
+          <div className="space-y-3">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="h-20 bg-gray-200 dark:bg-gray-700 rounded" />
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!reports || reports.length === 0) {
+    return (
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Agent Health Report</h3>
+        <p className="text-gray-500 dark:text-gray-400 mt-2">No evaluation reports yet. The monitor runs automatically after each agent discovery run.</p>
+      </div>
+    );
+  }
+
+  const latestReport = reports[0];
+  const pastReports = reports.slice(1);
+  const displayedPast = pastReports.slice(0, visibleCount);
+  const hasMore = pastReports.length > visibleCount;
+  const latestGrade = gradeColors[latestReport.overall_grade] || gradeColors.C;
+
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+      {/* Latest report — always fully displayed */}
+      <div className="flex items-start justify-between mb-4">
+        <div>
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+            Agent Health Report
+          </h3>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            {formatDistanceToNow(new Date(latestReport.created_at), { addSuffix: true })}
+          </p>
+        </div>
+        <div className={`w-14 h-14 rounded-xl ${latestGrade.bg} border-2 ${latestGrade.border} flex items-center justify-center`}>
+          <span className={`text-2xl font-bold ${latestGrade.text}`}>
+            {latestReport.overall_grade}
+          </span>
+        </div>
+      </div>
+
+      <ReportContent report={latestReport} />
+
+      {/* Past reports timeline */}
+      {pastReports.length > 0 && (
+        <>
+          <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
+            <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4">
+              Past Reports
+            </h4>
+            <div className={visibleCount > REPORTS_PER_PAGE ? 'max-h-[600px] overflow-y-auto pr-2' : ''}>
+              {displayedPast.map((report) => (
+                <PastReportCard
+                  key={report.id}
+                  report={report}
+                  isExpanded={expandedId === report.id}
+                  onToggle={() => setExpandedId(expandedId === report.id ? null : report.id)}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* Show more button */}
+          {hasMore && (
+            <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+              <button
+                onClick={() => setVisibleCount(prev => prev + REPORTS_PER_PAGE)}
+                className="w-full py-2 text-sm font-medium text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 transition-colors"
+              >
+                Show more ({pastReports.length - visibleCount} remaining)
+              </button>
+            </div>
+          )}
+        </>
       )}
 
       {/* Footer */}

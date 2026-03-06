@@ -42,7 +42,7 @@ export default function ObservatoryPage() {
   const [successfulRuns, setSuccessfulRuns] = useState(0);
   const [averageEventsPerRun, setAverageEventsPerRun] = useState(0);
   const [totalEventsAdded, setTotalEventsAdded] = useState(0);
-  const [monitorReport, setMonitorReport] = useState<MonitorReportData | null>(null);
+  const [monitorReports, setMonitorReports] = useState<MonitorReportData[]>([]);
 
   useEffect(() => {
     fetchAllData();
@@ -164,14 +164,13 @@ export default function ObservatoryPage() {
         .eq('errors', 0);
       setSuccessfulRuns(successfulRunsCount || 0);
 
-      // Fetch latest monitor report
+      // Fetch monitor reports
       const { data: monitorData } = await supabase
         .from('monitor_reports')
         .select('id, created_at, overall_grade, summary, findings, auto_actions')
         .order('created_at', { ascending: false })
-        .limit(1)
-        .single();
-      setMonitorReport(monitorData);
+        .limit(90);
+      setMonitorReports(monitorData || []);
 
       // Calculate average events per run and total events added
       const { data: allRunsData } = await supabase
@@ -338,7 +337,7 @@ export default function ObservatoryPage() {
             subtitle="Automated self-evaluation of system effectiveness"
             icon="🩺"
           />
-          <MonitorReport report={monitorReport} loading={loading} />
+          <MonitorReport reports={monitorReports} loading={loading} />
         </section>
 
         {/* ============================================ */}
