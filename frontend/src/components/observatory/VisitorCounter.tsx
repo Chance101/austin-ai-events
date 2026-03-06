@@ -65,7 +65,7 @@ export default function VisitorCounter() {
               {formatCount(counts.humanCount)}
             </span>
             <span className="text-[10px] text-gray-500 uppercase tracking-widest">
-              Calendar Visitors
+              Calendar Visits
             </span>
           </div>
         </div>
