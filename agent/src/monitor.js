@@ -181,71 +181,88 @@ async function gatherMetrics() {
 async function evaluateWithClaude(metrics) {
   const anthropic = getClient();
 
-  const prompt = `You are a monitoring agent for an automated AI event calendar system (austinai.events). Your job is to evaluate the system's overall effectiveness and identify issues.
+  const today = new Date().toISOString().split('T')[0];
+  const prompt = `You are the strategic brain of an automated AI event calendar system (austinai.events). You run on Opus because this is the most important decision point in the system — your analysis drives what the system does next.
 
-## System Context
-This system automatically discovers AI-related events in Austin, TX by scraping 11+ sources daily, validating them with AI, deduplicating, and publishing to a public calendar. It runs once daily via GitHub Actions.
+## System Architecture
+- 10 hardcoded scrapers run daily, scraping Austin AI event sources (Lu.ma, Meetup, AICamp, etc.)
+- Events are validated (is it real? AI-focused? in Austin?) using Haiku (fast model)
+- Events are classified (audience, level) using Haiku
+- Duplicates are detected via fuzzy matching + Haiku semantic comparison
+- Web search (SerpAPI, 5 calls/day) finds new event sources and individual events
+- Search queries in the database drive what gets searched — you control these queries
+- The query table has a 50-query cap. Underperforming queries are now aggressively recycled.
+
+## Your Role
+You are the ONLY entity that creates new search queries. The system no longer auto-generates generic queries. Every query you create should be targeted and strategic, based on specific gaps you identify.
+
+## Today's Date: ${today}
 
 ## Current Metrics
 ${JSON.stringify(metrics, null, 2)}
 
 ## Your Task
-Evaluate the system across these dimensions and respond with ONLY valid JSON (no markdown, no code fences):
+Evaluate the system and respond with ONLY valid JSON (no markdown, no code fences):
 
 {
   "overall_grade": "A|B|C|D|F",
-  "summary": "1-2 sentence overall assessment",
+  "summary": "1-2 sentence assessment focusing on what CHANGED since last evaluation, not repeating known issues",
   "findings": [
     {
       "category": "coverage|sources|pipeline|cost|reliability",
       "severity": "critical|warning|info|positive",
-      "finding": "What you observed",
-      "recommendation": "What should be done (or null for positive findings)"
+      "finding": "What you observed — be SPECIFIC, not generic",
+      "recommendation": "Actionable next step (or null for positive findings)"
     }
   ],
   "auto_actions": [
     {
       "type": "deactivate_query|create_query|create_source_query|boost_query|flag_source",
       "detail": "Specific action description",
-      "query_text": "for query actions, the query string",
+      "query_text": "for query actions, the exact search string",
       "source_url": "for source actions, the URL",
-      "reason": "Why this action should be taken"
+      "reason": "Why this specific action, not a generic one"
     }
   ]
 }
 
 ## Grading Criteria
-- A: Calendar is well-populated, sources healthy, few errors, good coverage
-- B: Generally working well, minor issues to address
-- C: Functional but notable gaps or recurring problems
-- D: Significant issues affecting calendar quality
-- F: System is fundamentally broken or producing no value
+- A: 20+ upcoming events, <10 empty days, diverse sources, <5% error rate
+- B: 15-20 upcoming events, <15 empty days, sources mostly healthy
+- C: 10-15 upcoming events, 15-20 empty days, some source issues
+- D: <10 upcoming events, 20+ empty days, multiple broken sources
+- F: System producing no value
 
-## Guidelines for findings
-- Be specific and actionable, not generic
-- Include at least one positive finding if warranted
-- Flag critical issues first
-- For coverage: are there enough events on the calendar? Any empty weeks?
-- For sources: which are productive vs. dead weight?
-- For pipeline: what % of events pass validation? Is dedup working?
-- For cost: are Claude API calls being spent efficiently?
-- For reliability: are there recurring errors?
+## CRITICAL Guidelines for Findings
+- Do NOT repeat the same generic observations every day (e.g., "coverage is poor", "3 sources returning zero")
+- If you've flagged an issue before and nothing changed, note it's RECURRING and escalate severity
+- Focus on what's DIFFERENT from previous runs
+- Be specific: name the sources, the dates, the numbers
+- Identify ROOT CAUSES, not symptoms
 
-## Guidelines for auto_actions (CONSERVATIVE)
-- Only suggest auto-actions that are safe and reversible
-- deactivate_query: for queries with very low priority that haven't found anything useful
-- create_query: when there's a clear coverage gap and you want to find individual events directly
-- create_source_query: when coverage gaps suggest we need to find NEW listing pages/event sources
-  (e.g., "Austin AI meetup groups site:meetup.com", "Austin machine learning events calendar")
-  These target source discovery — finding new recurring event pages, not individual events.
-  Use this when the system needs more sources, not just more searches for one-off events.
-- boost_query: when a query type has been productive but priority decayed
-- flag_source: when a source has been consistently failing (do NOT suggest removing — just flag)
+## Guidelines for auto_actions (STRATEGIC)
+You are the sole query strategist. Every query you create must be purposeful:
+
+- **create_query** (event_search): Find specific events for specific date gaps
+  BAD: "Austin AI events 2026" (too generic, will return noise)
+  GOOD: "Austin AI meetup March 2026 site:lu.ma OR site:meetup.com" (targeted, specific timeframe)
+  GOOD: "Capital Factory AI events March" (specific venue + topic + timeframe)
+
+- **create_source_query** (source_discovery): Find NEW listing pages we should scrape
+  BAD: "Austin artificial intelligence events" (generic, already tried)
+  GOOD: "Austin AI community calendar site:lu.ma" (specific platform)
+  GOOD: "Austin machine learning group events site:meetup.com" (specific platform + topic)
+
+- **deactivate_query**: Remove queries that aren't earning their keep
+- **boost_query**: Revive a query that found something before but priority decayed
+- **flag_source**: Flag a broken source with SPECIFIC diagnosis of what's wrong
+
 - Maximum 3 auto-actions per evaluation
-- When creating queries, make them specific to Austin AI events`;
+- Before creating a query, check if a similar one exists in the active queries list
+- Every query should target a SPECIFIC gap (date range, event type, platform, community)`;
 
   const response = await anthropic.messages.create({
-    model: config.claudeModel,
+    model: config.models.strategic,
     max_tokens: 2048,
     temperature: 0,
     messages: [{ role: 'user', content: prompt }],
@@ -308,19 +325,20 @@ async function executeAutoActions(actions) {
             });
             break;
           }
-          // Recycle stale queries before checking the cap
+          // Recycle underperforming queries before checking the cap
           const { data: staleQueries } = await supabase
             .from('search_queries')
-            .select('id, query_text')
-            .eq('is_active', true)
-            .eq('created_by', 'agent')
-            .lte('priority_score', 0.05)
-            .gte('times_run', 10);
-          if (staleQueries?.length > 0) {
-            for (const q of staleQueries) {
+            .select('id, query_text, times_run, sources_found, priority_score')
+            .eq('is_active', true);
+          const recyclable = (staleQueries || []).filter(q =>
+            (q.times_run >= 2 && q.sources_found === 0 && q.priority_score < 0.3) ||
+            (q.times_run >= 5 && q.priority_score < 0.15)
+          );
+          if (recyclable.length > 0) {
+            for (const q of recyclable) {
               await supabase.from('search_queries').update({ is_active: false }).eq('id', q.id);
             }
-            console.log(`    Recycled ${staleQueries.length} stale queries to make room`);
+            console.log(`    Recycled ${recyclable.length} underperforming queries to make room`);
           }
           // Check active query count
           const { count } = await supabase

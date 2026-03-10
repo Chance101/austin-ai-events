@@ -252,7 +252,7 @@ Return ONLY the JSON object, no other text.`;
 
   try {
     const response = await anthropic.messages.create({
-      model: config.claudeModel,
+      model: config.models.standard,
       max_tokens: 500,
       messages: [{ role: 'user', content: prompt }],
     });
@@ -343,123 +343,41 @@ async function updateQueryStats(queryId, sourcesFound) {
 }
 
 /**
- * Deactivate underperforming queries with relaxed criteria.
- * Only deactivate if ALL conditions are met:
- * - created_by = 'agent' (NEVER deactivate seed or feedback queries)
- * - times_run >= 5 (down from 10)
- * - sources_found = 0
- * - priority_score < 0.1 (up from 0.01)
+ * Deactivate underperforming queries — applies to ALL queries including seed.
+ * A query is deactivated if:
+ * - times_run >= 2 AND sources_found = 0 AND priority_score < 0.3
+ * OR
+ * - times_run >= 5 AND priority_score < 0.15 (even if it found something once)
+ *
+ * No query gets a permanent free pass — if it's not producing, it goes.
  */
 async function deactivateFailedQueries() {
-  // Only consider agent-created queries with 5+ runs
   const { data: queries } = await supabase
     .from('search_queries')
     .select('id, query_text, times_run, sources_found, priority_score, created_by')
-    .eq('is_active', true)
-    .eq('created_by', 'agent')  // Never deactivate seed queries
-    .gte('times_run', 5)
-    .eq('sources_found', 0);
+    .eq('is_active', true);
 
   if (!queries) return 0;
 
   let deactivated = 0;
   for (const query of queries) {
-    // Final check: only deactivate if priority has decayed significantly
-    if (query.priority_score < 0.1) {
+    const shouldDeactivate =
+      // Never produced anything and has been tried twice+
+      (query.times_run >= 2 && query.sources_found === 0 && query.priority_score < 0.3) ||
+      // Has been run enough and priority has decayed well below useful
+      (query.times_run >= 5 && query.priority_score < 0.15);
+
+    if (shouldDeactivate) {
       await supabase
         .from('search_queries')
         .update({ is_active: false })
         .eq('id', query.id);
-      console.log(`    Deactivated underperforming query: "${query.query_text}" (${query.times_run} runs, priority: ${query.priority_score.toFixed(4)})`);
+      console.log(`    Deactivated: "${query.query_text}" (${query.times_run} runs, found: ${query.sources_found}, priority: ${query.priority_score.toFixed(3)}, by: ${query.created_by})`);
       deactivated++;
     }
   }
 
   return deactivated;
-}
-
-/**
- * Use Claude to suggest new search queries based on discovered sources
- */
-async function suggestNewQueries(discoveredSources, existingQueries) {
-  const anthropic = getClient();
-
-  const prompt = `You are helping discover Austin AI/ML events.
-
-Sources recently discovered:
-${discoveredSources.length > 0 ? discoveredSources.map(s => `- ${s.name}: ${s.url}`).join('\n') : '- None this run'}
-
-Existing search queries already tried:
-${existingQueries.map(q => `- "${q}"`).join('\n')}
-
-Based on patterns in successful sources and gaps in coverage, suggest 3 NEW search queries that might find Austin AI events we're missing.
-
-Focus on:
-- Specific AI technologies (RAG, agents, LLMs, computer vision, etc.)
-- Different event types (workshops, hackathons, conferences, networking)
-- Related communities (data engineering, MLOps, AI ethics)
-- Local venues known for tech events
-
-Return ONLY a JSON array of 3 strings, no other text:
-["query 1", "query 2", "query 3"]`;
-
-  try {
-    const response = await anthropic.messages.create({
-      model: config.claudeModel,
-      max_tokens: 300,
-      messages: [{ role: 'user', content: prompt }],
-    });
-
-    const text = response.content[0].text.trim();
-    const jsonMatch = text.match(/\[[\s\S]*\]/);
-    if (!jsonMatch) {
-      return [];
-    }
-
-    return JSON.parse(jsonMatch[0]);
-  } catch (error) {
-    console.error(`    Query suggestion error: ${error.message}`);
-    return [];
-  }
-}
-
-/**
- * Add new queries to the database with deduplication
- */
-async function addNewQueries(queries) {
-  let added = 0;
-
-  // Get existing query texts for deduplication
-  const { data: existing } = await supabase
-    .from('search_queries')
-    .select('query_text')
-    .eq('is_active', true);
-
-  const existingTexts = new Set((existing || []).map(q => q.query_text.toLowerCase().trim()));
-
-  for (const queryText of queries) {
-    const normalizedQuery = queryText.toLowerCase().trim();
-
-    // Skip if similar query exists
-    if (existingTexts.has(normalizedQuery)) {
-      console.log(`    ⏭️  Query already exists: "${queryText}"`);
-      continue;
-    }
-
-    const { error } = await supabase
-      .from('search_queries')
-      .insert({
-        query_text: queryText,
-        created_by: 'agent',
-      });
-
-    if (!error) {
-      console.log(`    Added new query: "${queryText}"`);
-      added++;
-      existingTexts.add(normalizedQuery);
-    }
-  }
-  return added;
 }
 
 /**
@@ -475,7 +393,6 @@ export async function discoverSources(runStats = null) {
     sourcesDiscovered: 0,
     trustedSourcesAdded: 0,
     queriesDeactivated: 0,
-    newQueriesAdded: 0,
     claudeApiCalls: 0,
     serpapiCalls: 0,
   };
@@ -570,47 +487,14 @@ export async function discoverSources(runStats = null) {
   console.log('\n  🧹 Checking for underperforming queries...');
   stats.queriesDeactivated = await deactivateFailedQueries();
 
-  // Learning loop: suggest new queries
-  console.log('\n  🧠 Learning loop: generating new queries...');
-
-  // Recycle stale queries before checking the cap
-  const { data: staleQueries } = await supabase
-    .from('search_queries')
-    .select('id, query_text')
-    .eq('is_active', true)
-    .eq('created_by', 'agent')
-    .lte('priority_score', 0.05)
-    .gte('times_run', 10);
-
-  if (staleQueries?.length > 0) {
-    for (const q of staleQueries) {
-      await supabase.from('search_queries').update({ is_active: false }).eq('id', q.id);
-    }
-    console.log(`    Recycled ${staleQueries.length} stale queries`);
-  }
-
-  // Check total active queries before adding more
+  // Query management — no auto-generation. New queries come only from
+  // the monitor (Opus) when it identifies specific strategic gaps.
   const { count: activeQueryCount } = await supabase
     .from('search_queries')
     .select('*', { count: 'exact', head: true })
     .eq('is_active', true);
 
-  if (activeQueryCount >= 50) {
-    console.log(`    ⚠️ Query cap reached (${activeQueryCount}/50), skipping new query generation`);
-  } else {
-    const existingQueryTexts = queries.map(q => q.query_text);
-    const { data: allQueries } = await supabase
-      .from('search_queries')
-      .select('query_text');
-
-    const allQueryTexts = (allQueries || []).map(q => q.query_text);
-    const suggestedQueries = await suggestNewQueries(discoveredSources, allQueryTexts);
-    stats.claudeApiCalls++;  // Track Claude API call for query suggestion
-
-    if (suggestedQueries.length > 0) {
-      stats.newQueriesAdded = await addNewQueries(suggestedQueries);
-    }
-  }
+  console.log(`\n  📊 Active queries: ${activeQueryCount}/50 (after cleanup)`);
 
   // Print summary
   console.log('\n  ' + '─'.repeat(40));
@@ -621,7 +505,6 @@ export async function discoverSources(runStats = null) {
   console.log(`    Sources discovered:    ${stats.sourcesDiscovered}`);
   console.log(`    Trusted sources added: ${stats.trustedSourcesAdded}`);
   console.log(`    Queries deactivated:   ${stats.queriesDeactivated}`);
-  console.log(`    New queries added:     ${stats.newQueriesAdded}`);
   console.log('  ' + '─'.repeat(40) + '\n');
 
   return stats;

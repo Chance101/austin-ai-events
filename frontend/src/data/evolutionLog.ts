@@ -14,6 +14,24 @@ export interface StewardshipEntry {
 
 export const stewardshipLog: StewardshipEntry[] = [
   {
+    id: 'multimodel-query-overhaul',
+    date: '2026-03-10',
+    title: 'Multi-Model Architecture + Query System Overhaul',
+    problem: 'Monitor gave C grade for 6 consecutive days with identical generic findings. Root cause: (1) All Claude calls used the same Sonnet model — overkill for simple validation, underpowered for strategic decisions. (2) Query system was broken: recycling thresholds were mathematically impossible to reach (priority < 0.05 AND times_run >= 10, but queries run once every ~17 days), seed queries were immortal, and 3 generic queries were auto-generated every run, filling the 50-query cap with garbage.',
+    action: 'Implemented multi-model architecture: Haiku for high-volume simple tasks (validation, classification, dedup — ~80% of calls), Sonnet for moderate reasoning (source evaluation, image analysis), Opus for strategic decisions (monitor evaluation — the system\'s brain). Overhauled query system: aggressive recycling (priority < 0.3 AND times_run >= 2), ALL queries eligible for deactivation including seed, removed auto-generation of 3 queries/run, Opus monitor is now the sole query strategist.',
+    result: 'Cost structure inverted — bulk calls are cheap (Haiku), the one expensive call (Opus monitor) goes where reasoning quality matters most. Query table will self-clean on next run, unblocking the monitor from creating targeted strategic queries instead of generic ones.',
+    category: 'optimization',
+  },
+  {
+    id: 'fix-broken-scrapers',
+    date: '2026-03-10',
+    title: 'Fix Broken Scrapers: AICamp, HackAI, AITX',
+    problem: 'Monitor reported C grade for 6 consecutive days with identical findings. Investigation revealed three scraper failures: (1) AICamp global listing page is client-side rendered — plain fetch() + Cheerio saw an empty page, so zero Austin events were found despite 2-3 being available. (2) HackAI moved from Meetup to individual Lu.ma event pages with no centralized calendar — the Meetup URL returned 0 events for 14 straight runs. (3) AITX Lu.ma URL used old lu.ma domain requiring a 301 redirect on every scrape.',
+    action: 'Switched AICamp scraper to the city-filtered URL (eventsquery?city=US-Austin) which is server-side rendered and returns only Austin events. Removed dead HackAI Meetup source from config (events discovered via web search and Austin AI Alliance). Updated AITX URL from lu.ma/aitx to luma.com/aitx to avoid redirect.',
+    result: 'AICamp scraper now finds Austin events reliably. Dead HackAI source no longer wastes scrape cycles. AITX scraper avoids unnecessary redirect. Source count: 10 active (down from 11, but 11th was dead weight).',
+    category: 'learning',
+  },
+  {
     id: 'dedup-before-validation',
     date: '2026-03-05',
     title: 'Move Dedup Before Validation to Cut API Waste',

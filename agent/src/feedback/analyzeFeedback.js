@@ -131,7 +131,7 @@ Respond with ONLY valid JSON:
 
   try {
     const response = await anthropic.messages.create({
-      model: config.claudeModel,
+      model: config.models.standard,
       max_tokens: 800,
       messages: [{ role: 'user', content: prompt }],
     });

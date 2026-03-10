@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Frontend: Next.js 16 + React 19 + TypeScript + Tailwind CSS 4
 - Backend Agent: Node.js 20+ (vanilla JavaScript, ES modules)
 - Database: Supabase (PostgreSQL)
-- AI: Anthropic Claude API
+- AI: Anthropic Claude API (multi-model: Haiku / Sonnet / Opus)
 - Hosting: Vercel (frontend), GitHub Actions (agent)
 
 ## Quick Commands
@@ -178,25 +178,23 @@ Update `frontend/src/data/evolutionLog.ts` when:
 
 Workflow: **Code → Test → Document → Update Evolution Log → Commit**
 
-### Claude API Usage
-**Current Model**: `claude-sonnet-4-5`
+### Claude API Usage — Multi-Model Architecture
+The system uses three model tiers, configured in `config.js`:
 
-**Common Tasks:**
-- Event validation (real? upcoming? AI-focused? Austin-based?)
-- Classification (audience type, technical level)
-- Duplicate detection via semantic understanding
-- Source discovery via web search analysis
+| Tier | Model | Used For | ~Cost/call |
+|------|-------|----------|------------|
+| `fast` | `claude-haiku-4-5` | Validation, classification, dedup | $0.001 |
+| `standard` | `claude-sonnet-4-6` | Source evaluation, image analysis | $0.01 |
+| `strategic` | `claude-opus-4-6` | Monitor evaluation (system brain) | $0.10 |
 
-**Patterns:**
+**Design principle:** Haiku handles ~80% of calls (high-volume, structured tasks). The one expensive Opus call goes to the monitor — the only place where deep reasoning drives system behavior.
+
+**Access models via config:**
 ```javascript
-// Validation with JSON output
-const response = await client.messages.create({
-  model: 'claude-sonnet-4-5',
-  max_tokens: 1024,
-  messages: [{ role: 'user', content: prompt }],
-  temperature: 0,
-  tool_use: true
-});
+import { config } from '../config.js';
+// config.models.fast      → Haiku (validation, classification, dedup)
+// config.models.standard  → Sonnet (source eval, image extraction)
+// config.models.strategic → Opus (monitor evaluation)
 ```
 
 ### Event Processing Pipeline
@@ -263,8 +261,9 @@ Search queries are managed in the `search_queries` table and used for two purpos
 - **SerpAPI budget**: 5 searches/day total (3 source discovery + 2 event search)
 - **Deduplication**: New queries checked against existing before insert
 - **Cap**: Maximum 50 active queries at any time
-- **Deactivation**: Queries with priority < 0.1 after 5+ runs are deactivated
-- **Priority decay**: Queries that don't find new sources decrease in priority
+- **Query creation**: Only the Opus monitor creates new queries (no auto-generation)
+- **Aggressive recycling**: Queries deactivated if (times_run >= 2 AND sources_found = 0 AND priority < 0.3) OR (times_run >= 5 AND priority < 0.15). ALL queries eligible, including seed.
+- **Priority decay**: 10% per day since last success (`0.9^days`)
 - **Event search rotation**: Queries selected by oldest `last_run` to ensure diversity
 
 ### Self-Monitoring Agent
@@ -272,23 +271,26 @@ The monitor (`agent/src/monitor.js`) runs automatically as the final phase of ev
 
 **How it works:**
 1. Gathers metrics from Supabase (run history, source performance, calendar coverage, query health)
-2. Sends all metrics to Claude for holistic evaluation
+2. Sends all metrics to **Opus** (strategic model) for deep evaluation
 3. Receives structured report: letter grade (A-F), categorized findings, and recommended auto-actions
 4. Executes safe auto-actions (max 3 per run), stores report in `monitor_reports` table
 
+**Why Opus for the monitor:**
+The monitor is the system's brain — it drives the feedback loop. Opus identifies root causes rather than symptoms, generates targeted queries rather than generic ones, and avoids repeating the same findings daily.
+
 **Auto-actions (safe, reversible):**
-- `create_query`: Add new event-search queries when coverage gaps detected
-- `create_source_query`: Add source-discovery queries to find new listing pages/Meetup groups
+- `create_query`: Add event-search queries for specific coverage gaps (Opus is the sole query strategist)
+- `create_source_query`: Add source-discovery queries to find new listing pages
   (inserted with `query_type: 'source_discovery'`, picked up by next discovery run)
-- `deactivate_query`: Remove stale queries with low priority
+- `deactivate_query`: Remove underperforming queries
 - `boost_query`: Increase priority for productive queries
 - `flag_source`: Log concern about a source (no destructive action)
 
 **Monitor → Discovery handoff:**
-When the monitor detects coverage gaps, it creates `create_source_query` actions targeting new event sources (e.g., "Austin AI meetup groups site:meetup.com"). These are inserted into `search_queries` with `query_type: 'source_discovery'` and `priority_score: 1.0`. On the next agent run, `discoverSources()` picks them up and searches for new listing pages, closing the autonomous discovery loop.
+When the monitor detects coverage gaps, it creates targeted `create_source_query` actions. These are inserted into `search_queries` with `query_type: 'source_discovery'` and `priority_score: 1.0`. On the next agent run, `discoverSources()` picks them up and searches for new listing pages.
 
-**Smart query recycling:**
-Both the discovery system and the monitor automatically deactivate stale queries (priority <= 0.05, 10+ runs, agent-created) before checking the 50-query cap. This prevents the query table from filling up with dead queries and blocking new discoveries.
+**Aggressive query recycling:**
+Queries are deactivated when: (times_run >= 2 AND sources_found = 0 AND priority < 0.3) OR (times_run >= 5 AND priority < 0.15). ALL queries are eligible, including seed/human-created. This ensures the query table stays clean and unblocked for the monitor's strategic additions.
 
 **What requires human intervention:**
 - Broken scrapers (HTML structure changes)
@@ -307,7 +309,10 @@ Both the discovery system and the monitor automatically deactivate stale queries
 - Audit needed: `luma.js`, `meetup.js`, `websearch.js`, `generic.js`, `austinai.js`, `austinforum.js` (see TODO.md)
 
 ### API Costs & Rate Limiting
-- **Claude API**: ~$0.50-0.75/day with trust tiers (was ~$1.50/day before)
+- **Claude API**: Multi-model architecture optimizes cost allocation
+  - Haiku handles validation, classification, dedup (~80% of calls, cheapest)
+  - Sonnet handles source evaluation, image analysis (moderate)
+  - Opus handles monitor evaluation (1 call/run, most expensive but highest leverage)
   - Trusted/config sources skip validation entirely
   - Only probation sources incur validation costs
 - **SerpAPI**: Free tier covers ~5 searches/day (budget: 3 source discovery + 2 event search)

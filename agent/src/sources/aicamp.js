@@ -1,24 +1,22 @@
 import * as cheerio from 'cheerio';
 import { decodeHtmlEntities } from '../utils/html.js';
 
-const EVENTS_URL = 'https://www.aicamp.ai/event/events';
-
 /**
  * Scrape Austin AI events from AICamp
- * Fetches the global events listing and filters for Austin events
+ * Uses the city-filtered page (server-rendered) which only shows Austin events
  */
 export async function scrapeAICamp(sourceConfig) {
   const events = [];
 
   try {
-    const response = await fetch(EVENTS_URL, {
+    const response = await fetch(sourceConfig.url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       },
     });
 
     if (!response.ok) {
-      console.error(`    Failed to fetch ${EVENTS_URL}: ${response.status}`);
+      console.error(`    Failed to fetch ${sourceConfig.url}: ${response.status}`);
       return events;
     }
 
@@ -26,53 +24,55 @@ export async function scrapeAICamp(sourceConfig) {
     const $ = cheerio.load(html);
 
     // Find all event links (pattern: /event/eventdetails/XXXXX)
+    // The city-filtered page is server-rendered, so all links are in the HTML
     const eventLinks = [];
     $('a[href*="/event/eventdetails/"]').each((_, el) => {
       const $el = $(el);
       const href = $el.attr('href');
-      const text = $el.text();
+      const text = $el.text().trim();
 
-      // Filter for Austin events — titles contain "(Austin)"
-      if (text.toLowerCase().includes('(austin)') || text.toLowerCase().includes('austin')) {
-        const fullUrl = href.startsWith('http')
-          ? href
-          : `https://www.aicamp.ai${href}`;
+      if (!href || !text) return;
 
-        // Extract event ID from URL
-        const eventId = href.split('/').pop();
+      const fullUrl = href.startsWith('http')
+        ? href
+        : `https://www.aicamp.ai${href}`;
 
-        // Try to extract date from card text
-        // Format: "Mar 04, 05:30 PM CST" or "Apr 01, 05:30 PM CDT"
-        const dateMatch = text.match(/(\w{3})\s+(\d{1,2}),?\s+(\d{1,2}:\d{2}\s*[AP]M)\s*(\w{3,4})?/i);
+      const eventId = href.split('/').pop();
 
-        let startTime = null;
-        if (dateMatch) {
-          const monthStr = dateMatch[1];
-          const day = dateMatch[2];
-          const time = dateMatch[3];
-          const year = new Date().getFullYear();
-          const dateStr = `${monthStr} ${day}, ${year} ${time}`;
-          const parsed = new Date(dateStr);
-          if (!isNaN(parsed)) {
-            startTime = parsed.toISOString();
-          }
+      // Skip if we already have this event (image links and title links share the same href)
+      if (eventLinks.some(e => e.eventId === eventId)) return;
+
+      // Only keep links that have meaningful text (skip image-only links)
+      if (text.length < 5) return;
+
+      // Try to extract date from card text
+      // Format: "Mar 04, 05:30 PM CST" or "Apr 01, 05:30 PM CDT"
+      const dateMatch = text.match(/(\w{3})\s+(\d{1,2}),?\s+(\d{1,2}:\d{2}\s*[AP]M)\s*(\w{3,4})?/i);
+
+      let startTime = null;
+      if (dateMatch) {
+        const monthStr = dateMatch[1];
+        const day = dateMatch[2];
+        const time = dateMatch[3];
+        const year = new Date().getFullYear();
+        const dateStr = `${monthStr} ${day}, ${year} ${time}`;
+        const parsed = new Date(dateStr);
+        if (!isNaN(parsed)) {
+          startTime = parsed.toISOString();
         }
+      }
 
-        // Extract title — usually the most prominent text
-        // Pattern: "AI Meetup (Austin): Topic Name" or "AI Lab (Austin) - Topic"
-        const titleMatch = text.match(/(AI\s+(?:Meetup|Lab|Workshop|Bootcamp|Summit)\s*\(Austin\)[:\s-]*[^\n]+)/i);
-        const title = titleMatch
-          ? decodeHtmlEntities(titleMatch[1].trim())
-          : decodeHtmlEntities(text.split('\n').find(l => l.toLowerCase().includes('austin'))?.trim() || '');
+      // Extract title from text — take the first substantial line
+      const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 5);
+      const title = lines[0] ? decodeHtmlEntities(lines[0]) : '';
 
-        if (title && fullUrl) {
-          eventLinks.push({
-            url: fullUrl,
-            eventId,
-            title,
-            startTime,
-          });
-        }
+      if (title && fullUrl) {
+        eventLinks.push({
+          url: fullUrl,
+          eventId,
+          title,
+          startTime,
+        });
       }
     });
 
@@ -110,8 +110,8 @@ export async function scrapeAICamp(sourceConfig) {
             start_time: link.startTime,
             end_time: null,
             venue_name: null,
-            address: null,
-            is_free: true, // AICamp events are typically free
+            address: 'Austin, TX',
+            is_free: true,
             organizer: 'AICamp',
             image_url: null,
           });
@@ -128,7 +128,7 @@ export async function scrapeAICamp(sourceConfig) {
           start_time: link.startTime,
           end_time: null,
           venue_name: null,
-          address: null,
+          address: 'Austin, TX',
           is_free: true,
           organizer: 'AICamp',
           image_url: null,
@@ -226,7 +226,7 @@ async function fetchEventDetail(url, sourceConfig) {
         start_time: startTime,
         end_time: null,
         venue_name: venue,
-        address: null,
+        address: 'Austin, TX',
         is_free: true,
         organizer: 'AICamp',
         image_url: $('meta[property="og:image"]').attr('content') || null,

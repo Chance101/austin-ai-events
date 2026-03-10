@@ -9,8 +9,18 @@ export const config = {
   supabaseUrl: process.env.SUPABASE_URL,
   supabaseServiceKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
 
-  // Claude model for reasoning
-  claudeModel: 'claude-sonnet-4-5',
+  // Claude models — multi-model architecture
+  // fast:      cheap, high-volume tasks (validation, classification, dedup)
+  // standard:  moderate reasoning (source evaluation, image analysis)
+  // strategic: complex reasoning (monitor evaluation, system-level decisions)
+  models: {
+    fast: 'claude-haiku-4-5-20251001',
+    standard: 'claude-sonnet-4-6',
+    strategic: 'claude-opus-4-6',
+  },
+
+  // Backward compat alias (used by any code not yet migrated)
+  claudeModel: 'claude-sonnet-4-6',
 
   // Known Austin AI community sources
   sources: [
@@ -18,16 +28,13 @@ export const config = {
     {
       id: 'aitx',
       name: 'AITX',
-      url: 'https://lu.ma/aitx',
+      url: 'https://luma.com/aitx',
       type: 'luma',
     },
     // Meetup groups
-    {
-      id: 'hackai',
-      name: 'HackAI',
-      url: 'https://www.meetup.com/hack-ai/events/',
-      type: 'meetup',
-    },
+    // NOTE: HackAI removed — they moved from Meetup to individual Lu.ma event pages
+    // with no centralized calendar. Their events are discovered via web search and
+    // cross-listed on Austin AI Alliance.
     {
       id: 'austin-langchain',
       name: 'Austin LangChain',
@@ -68,11 +75,11 @@ export const config = {
       url: 'https://www.leadersinaisummit.com/austin',
       type: 'leadersinai',
     },
-    // AICamp - global events page, scraper filters to Austin
+    // AICamp - Austin-filtered listing (server-rendered, unlike the global page)
     {
       id: 'aicamp',
       name: 'AICamp',
-      url: 'https://www.aicamp.ai/event/events',
+      url: 'https://www.aicamp.ai/event/eventsquery?city=US-Austin',
       type: 'aicamp',
     },
     // Capital Factory - Austin tech hub (own events + Lu.ma events at CF venue)

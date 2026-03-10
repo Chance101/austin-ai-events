@@ -46,7 +46,7 @@ export async function extractLocationFromImage(imageUrl) {
     else if (contentType.includes('webp')) mediaType = 'image/webp';
 
     const message = await anthropic.messages.create({
-      model: config.claudeModel,
+      model: config.models.standard,
       max_tokens: 300,
       messages: [{
         role: 'user',
@@ -157,7 +157,7 @@ IMPORTANT: You MUST verify the location based on venue_name or address fields in
 - "Austin area" or "Greater Austin" is acceptable; cities 50+ miles away are NOT`;
 
   const message = await anthropic.messages.create({
-    model: config.claudeModel,
+    model: config.models.fast,
     max_tokens: 500,
     messages: [{ role: 'user', content: prompt }],
   });
@@ -216,7 +216,7 @@ Guidelines for summary:
 - Make it readable and informative for someone scanning event listings`;
 
   const message = await anthropic.messages.create({
-    model: config.claudeModel,
+    model: config.models.fast,
     max_tokens: 500,
     messages: [{ role: 'user', content: prompt }],
   });
@@ -275,7 +275,7 @@ Respond with JSON:
 Consider: Same event might have slightly different titles or be listed on multiple platforms.`;
 
   const message = await anthropic.messages.create({
-    model: config.claudeModel,
+    model: config.models.fast,
     max_tokens: 300,
     messages: [{ role: 'user', content: prompt }],
   });
