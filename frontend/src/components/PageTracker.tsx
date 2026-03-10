@@ -1,22 +1,24 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef } from 'react';
 
 interface PageTrackerProps {
   page: string;
 }
 
 export default function PageTracker({ page }: PageTrackerProps) {
-  const [tracked, setTracked] = useState(false);
+  const tracked = useRef(false);
 
   useEffect(() => {
-    if (tracked) return;
+    if (tracked.current) return;
 
     // Skip if already tracked in the last 24 hours
     if (document.cookie.includes('_pv_tracked=1')) {
-      setTracked(true);
+      tracked.current = true;
       return;
     }
+
+    tracked.current = true;
 
     const trackVisit = async () => {
       try {
@@ -30,11 +32,10 @@ export default function PageTracker({ page }: PageTrackerProps) {
       } catch {
         // Silent fail
       }
-      setTracked(true);
     };
 
     trackVisit();
-  }, [tracked, page]);
+  }, [page]);
 
   return null;
 }
