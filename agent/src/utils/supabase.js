@@ -35,7 +35,7 @@ export async function getExistingEvents() {
 
   const { data, error } = await db
     .from('events')
-    .select('id, title, start_time, source, source_event_id, url')
+    .select('id, title, start_time, end_time, source, source_event_id, url, venue_name, address')
     // Include past 30 days so recently-passed events are still caught by dedup
     .gte('start_time', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString());
 
@@ -45,6 +45,23 @@ export async function getExistingEvents() {
   }
 
   return data || [];
+}
+
+/**
+ * Update key fields on an existing event (date moved, venue changed, etc.)
+ */
+export async function updateEventFields(eventId, fields) {
+  const db = getSupabase();
+
+  const { error } = await db
+    .from('events')
+    .update({ ...fields, updated_at: new Date().toISOString() })
+    .eq('id', eventId);
+
+  if (error) {
+    console.error('Error updating event fields:', error);
+    throw error;
+  }
 }
 
 export async function markEventAsVerified(eventId) {
