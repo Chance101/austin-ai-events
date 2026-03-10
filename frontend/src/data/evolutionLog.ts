@@ -14,6 +14,15 @@ export interface StewardshipEntry {
 
 export const stewardshipLog: StewardshipEntry[] = [
   {
+    id: 'scrape-schedule',
+    date: '2026-03-10',
+    title: 'Spread Scraping Across the Week',
+    problem: 'All 10 sources were scraped daily, producing 77% duplicate events every run. The duplicate noise made monitor metrics meaningless — Opus couldn\'t distinguish real gaps from re-discovered events. Events are typically posted a week+ out and users don\'t check the calendar daily, so real-time scraping adds no value.',
+    action: 'Added per-source scrape schedules: high-update sources (AITX, Austin AI Alliance, Capital Factory) scraped 3x/week (Mon/Wed/Fri), medium-update (AICamp, Meetup groups) 2x/week, low-update (UT Austin, AI Accelerator, Austin Forum, Leaders in AI) 1x/week. Total scrapes reduced from 70/week to ~15/week.',
+    result: 'Expected ~80% reduction in duplicate noise. Monitor gets cleaner metrics, enabling Opus to make targeted decisions about what\'s actually missing versus what\'s just being re-scraped. Events still discovered within 1-3 days of posting.',
+    category: 'optimization',
+  },
+  {
     id: 'multimodel-query-overhaul',
     date: '2026-03-10',
     title: 'Multi-Model Architecture + Query System Overhaul',

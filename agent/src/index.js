@@ -177,7 +177,7 @@ async function discoverEvents() {
     const discoveryStats = await discoverSources(runStats);
     runStats.queriesRun = discoveryStats.queriesRun;
     runStats.newSourcesFound = discoveryStats.sourcesDiscovered;
-    runStats.newQueriesGenerated = discoveryStats.newQueriesAdded;
+    runStats.newQueriesGenerated = 0;
     runStats.serpapiCalls += discoveryStats.serpapiCalls || 0;
     runStats.claudeApiCalls += discoveryStats.claudeApiCalls || 0;
   } catch (error) {
@@ -209,8 +209,24 @@ async function discoverEvents() {
 
   console.log('📡 Gathering sources...');
 
-  // Start with config sources (mark them as 'config' tier)
-  const allSources = config.sources.map(s => ({
+  // Filter config sources by scrape schedule (day of week)
+  const today = new Date();
+  const dayOfWeek = today.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+  const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+  const scheduledSources = config.sources.filter(s => {
+    if (!s.scrapeDays) return true; // No schedule = scrape daily
+    return s.scrapeDays.includes(dayOfWeek);
+  });
+  const skippedSources = config.sources.filter(s => s.scrapeDays && !s.scrapeDays.includes(dayOfWeek));
+
+  console.log(`  📅 ${dayNames[dayOfWeek]}: ${scheduledSources.length} sources scheduled, ${skippedSources.length} skipped`);
+  if (skippedSources.length > 0) {
+    console.log(`     Skipped today: ${skippedSources.map(s => s.name).join(', ')}`);
+  }
+
+  // Start with scheduled config sources (mark them as 'config' tier)
+  const allSources = scheduledSources.map(s => ({
     ...s,
     trust_tier: 'config',  // Config sources are always trusted
   }));

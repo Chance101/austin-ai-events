@@ -199,8 +199,12 @@ import { config } from '../config.js';
 
 ### Event Processing Pipeline
 1. **Scraping**: Each source returns `{ title, description, start_time, url, ... }`
-   - Scrapers should validate data quality before returning (e.g., `isGarbageText()` in aiaccelerator.js)
-   - All scrapers filter out past events before returning (compare `start_time` against `new Date()`)
+   - Sources are scraped on a **weekly schedule** (not daily) to reduce duplicate noise
+   - High-update sources (AITX, Austin AI, Capital Factory): 3x/week (Mon/Wed/Fri)
+   - Medium-update sources (AICamp, Meetup groups): 2x/week
+   - Low-update sources (UT Austin, AI Accelerator, Austin Forum, Leaders in AI): 1x/week
+   - Schedule configured via `scrapeDays` in `config.js` (0=Sun through 6=Sat)
+   - DB-discovered sources (trusted/probation) still scraped every run
    - Per-source event counts are tracked and logged to `agent_runs.source_results`
    - Sources returning 0 events trigger a console warning for silent failure detection
 2. **Pre-validation checks** (no Claude API cost):

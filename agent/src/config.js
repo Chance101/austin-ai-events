@@ -23,78 +23,88 @@ export const config = {
   claudeModel: 'claude-sonnet-4-6',
 
   // Known Austin AI community sources
+  // scrapeDays: days of week to scrape (0=Sun, 1=Mon, ..., 6=Sat)
+  // High-update sources: 3x/week (Mon/Wed/Fri)
+  // Medium-update sources: 2x/week
+  // Low-update sources: 1x/week
   sources: [
-    // Lu.ma calendars
+    // --- High-update: 3x/week (Mon, Wed, Fri) ---
     {
       id: 'aitx',
       name: 'AITX',
       url: 'https://luma.com/aitx',
       type: 'luma',
+      scrapeDays: [1, 3, 5],  // Community calendar, multiple organizers
     },
-    // Meetup groups
+    {
+      id: 'austin-ai',
+      name: 'Austin AI Alliance',
+      url: 'https://austin-ai.org/events/',
+      type: 'austinai',
+      scrapeDays: [1, 3, 5],  // Aggregator, cross-lists community events
+    },
+    {
+      id: 'capital-factory',
+      name: 'Capital Factory',
+      url: 'https://info.capitalfactory.com/ic-events',
+      type: 'capitalfactory',
+      scrapeDays: [1, 3, 5],  // Busy venue, frequent events
+    },
+
+    // --- Medium-update: 2x/week ---
     // NOTE: HackAI removed — they moved from Meetup to individual Lu.ma event pages
     // with no centralized calendar. Their events are discovered via web search and
     // cross-listed on Austin AI Alliance.
+    {
+      id: 'aicamp',
+      name: 'AICamp',
+      url: 'https://www.aicamp.ai/event/eventsquery?city=US-Austin',
+      type: 'aicamp',
+      scrapeDays: [2, 4],  // Monthly meetups
+    },
     {
       id: 'austin-langchain',
       name: 'Austin LangChain',
       url: 'https://www.meetup.com/austin-langchain-ai-group/events/',
       type: 'meetup',
+      scrapeDays: [2, 6],  // Monthly meetup
     },
     {
       id: 'ai-automation',
       name: 'AI Automation & Marketing',
       url: 'https://www.meetup.com/marketing-automation-ai/events/',
       type: 'meetup',
+      scrapeDays: [2, 6],  // Monthly meetup
     },
-    // Austin Forum on Technology & Society
-    {
-      id: 'austin-forum',
-      name: 'Austin Forum',
-      url: 'https://www.austinforum.org/events',
-      type: 'austinforum',
-    },
-    // AI Accelerator Institute
-    {
-      id: 'ai-accelerator',
-      name: 'AI Accelerator Institute',
-      url: 'https://world.aiacceleratorinstitute.com/location/austin/',
-      type: 'aiaccelerator',
-    },
-    // Austin AI Alliance
-    {
-      id: 'austin-ai',
-      name: 'Austin AI Alliance',
-      url: 'https://austin-ai.org/events/',
-      type: 'austinai',
-    },
-    // Leaders in AI Summit
-    {
-      id: 'leaders-in-ai',
-      name: 'Leaders in AI Summit',
-      url: 'https://www.leadersinaisummit.com/austin',
-      type: 'leadersinai',
-    },
-    // AICamp - Austin-filtered listing (server-rendered, unlike the global page)
-    {
-      id: 'aicamp',
-      name: 'AICamp',
-      url: 'https://www.aicamp.ai/event/eventsquery?city=US-Austin',
-      type: 'aicamp',
-    },
-    // Capital Factory - Austin tech hub (own events + Lu.ma events at CF venue)
-    {
-      id: 'capital-factory',
-      name: 'Capital Factory',
-      url: 'https://info.capitalfactory.com/ic-events',
-      type: 'capitalfactory',
-    },
-    // UT Austin AI - university research events
+
+    // --- Low-update: 1x/week ---
     {
       id: 'ut-austin',
       name: 'UT Austin AI',
       url: 'https://ai.utexas.edu/events',
       type: 'utaustin',
+      scrapeDays: [4],  // Academic calendar, slow-changing
+    },
+    {
+      id: 'ai-accelerator',
+      name: 'AI Accelerator Institute',
+      url: 'https://world.aiacceleratorinstitute.com/location/austin/',
+      type: 'aiaccelerator',
+      scrapeDays: [4],  // Rare Austin events
+    },
+    {
+      id: 'austin-forum',
+      name: 'Austin Forum',
+      url: 'https://www.austinforum.org/events',
+      type: 'austinforum',
+      scrapeDays: [0],  // Rarely has events
+    },
+    {
+      id: 'leaders-in-ai',
+      name: 'Leaders in AI Summit',
+      url: 'https://www.leadersinaisummit.com/austin',
+      type: 'leadersinai',
+      scrapeDays: [0],  // Conference, rarely updates
     },
   ],
 };
