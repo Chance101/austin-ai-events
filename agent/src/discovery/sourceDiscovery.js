@@ -659,7 +659,7 @@ export async function updateSourceStats(sourceUrl, eventsFound) {
   if (eventsFound === 0) {
     updates.consecutive_empty_scrapes = (source?.consecutive_empty_scrapes || 0) + 1;
 
-    // Demote after 5 consecutive empty scrapes (skip config sources)
+    // Demote after 5 consecutive empty scrapes (config sources get auto-skipped instead)
     if (updates.consecutive_empty_scrapes >= 5 && source?.trust_tier !== 'config') {
       updates.trust_tier = 'demoted';
       updates.is_trusted = false;
@@ -693,7 +693,7 @@ export async function updateSourceValidationStats(statsMap) {
       .eq('url', url)
       .single();
 
-    if (!source || source.trust_tier === 'config') continue;
+    if (!source) continue;
 
     const newPassCount = (source.validation_pass_count || 0) + stats.passed;
     const newFailCount = (source.validation_fail_count || 0) + stats.failed;
@@ -705,20 +705,23 @@ export async function updateSourceValidationStats(statsMap) {
       validation_fail_count: newFailCount,
     };
 
-    // Check for promotion (probation → trusted)
-    if (source.trust_tier === 'probation' && totalValidated >= 10 && passRate >= 0.8) {
-      updates.trust_tier = 'trusted';
-      updates.is_trusted = true;
-      updates.promoted_at = new Date().toISOString();
-      console.log(`    🎉 Promoted source to trusted: ${source.name} (${Math.round(passRate * 100)}% pass rate)`);
-    }
+    // Config sources: track stats but don't change tier (auto-skip handles them)
+    if (source.trust_tier !== 'config') {
+      // Check for promotion (probation → trusted)
+      if (source.trust_tier === 'probation' && totalValidated >= 10 && passRate >= 0.8) {
+        updates.trust_tier = 'trusted';
+        updates.is_trusted = true;
+        updates.promoted_at = new Date().toISOString();
+        console.log(`    🎉 Promoted source to trusted: ${source.name} (${Math.round(passRate * 100)}% pass rate)`);
+      }
 
-    // Check for demotion (probation → demoted)
-    if (source.trust_tier === 'probation' && totalValidated >= 10 && passRate < 0.3) {
-      updates.trust_tier = 'demoted';
-      updates.is_trusted = false;
-      updates.demoted_at = new Date().toISOString();
-      console.log(`    ⬇️ Demoted source: ${source.name} (${Math.round(passRate * 100)}% pass rate)`);
+      // Check for demotion (probation → demoted)
+      if (source.trust_tier === 'probation' && totalValidated >= 10 && passRate < 0.3) {
+        updates.trust_tier = 'demoted';
+        updates.is_trusted = false;
+        updates.demoted_at = new Date().toISOString();
+        console.log(`    ⬇️ Demoted source: ${source.name} (${Math.round(passRate * 100)}% pass rate)`);
+      }
     }
 
     await supabase.from('sources').update(updates).eq('url', url);

@@ -60,21 +60,21 @@ export const config = {
       name: 'AICamp',
       url: 'https://www.aicamp.ai/event/eventsquery?city=US-Austin',
       type: 'aicamp',
-      scrapeDays: [2, 4],  // Monthly meetups
+      scrapeDays: [4],  // Monthly meetups, 1x/week is sufficient
     },
     {
       id: 'austin-langchain',
       name: 'Austin LangChain',
       url: 'https://www.meetup.com/austin-langchain-ai-group/events/',
       type: 'meetup',
-      scrapeDays: [2, 6],  // Monthly meetup
+      scrapeDays: [4],  // Monthly meetup, 1x/week
     },
     {
       id: 'ai-automation',
       name: 'AI Automation & Marketing',
       url: 'https://www.meetup.com/marketing-automation-ai/events/',
       type: 'meetup',
-      scrapeDays: [2, 6],  // Monthly meetup
+      scrapeDays: [4],  // Monthly meetup, 1x/week
     },
 
     // --- Low-update: 1x/week ---

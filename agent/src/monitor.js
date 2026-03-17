@@ -386,7 +386,7 @@ Evaluate the system and respond with ONLY valid JSON (no markdown, no code fence
   ],
   "auto_actions": [
     {
-      "type": "deactivate_query|create_query|create_source_query|boost_query|flag_source|add_source_context|escalate_to_human|resolve_action_item",
+      "type": "deactivate_query|create_query|create_source_query|boost_query|flag_source|add_source_context|escalate_to_human|resolve_action_item|skip_source",
       "detail": "Specific action description",
       "query_text": "for query actions, the exact search string",
       "source_url": "for source actions, the URL",
@@ -446,6 +446,12 @@ You are the sole query strategist. Every query you create must be purposeful:
 - **escalate_to_human**: Create a persistent action item for issues you can't fix.
   Use for: broken scrapers needing code changes, new platform types, strategic decisions, data quality issues needing manual review.
   Include severity, category, title, description, and suggested_fix.
+
+- **skip_source**: Permanently skip a DB-discovered source (probation/trusted) that is no longer producing value.
+  Use for: sources with sustained 0% pass rate, wrong-city events, one-time conferences that have ended, dead groups.
+  Sets trust_tier to 'demoted'. If the source becomes active again in the future, web search will rediscover it.
+  Provide source_url. IMPORTANT: You may ONLY skip DB-discovered sources (probation/trusted tier).
+  For config sources, use escalate_to_human instead — config sources were manually vetted and require human review.
 
 - **resolve_action_item**: Mark a previously escalated action item as resolved.
   Use when the underlying issue has been fixed (you can see this in the current run's data).
@@ -635,6 +641,45 @@ async function executeAutoActions(actions, reportId) {
             action: 'escalate_to_human',
             detail: action.title,
             result: error ? `Failed: ${error.message}` : 'Created action item',
+          });
+          break;
+        }
+
+        case 'skip_source': {
+          if (!action.source_url) {
+            results.push({
+              action: 'skip_source',
+              detail: action.detail || 'unknown',
+              result: 'Skipped (missing source_url)',
+            });
+            break;
+          }
+          // Only allow skipping non-config sources
+          const { data: srcToSkip } = await supabase
+            .from('sources')
+            .select('trust_tier, name')
+            .eq('url', action.source_url)
+            .single();
+          if (srcToSkip?.trust_tier === 'config') {
+            results.push({
+              action: 'skip_source',
+              detail: srcToSkip.name || action.source_url,
+              result: 'Blocked: config sources require escalate_to_human',
+            });
+            break;
+          }
+          const { error } = await supabase
+            .from('sources')
+            .update({
+              trust_tier: 'demoted',
+              is_trusted: false,
+              demoted_at: new Date().toISOString(),
+            })
+            .eq('url', action.source_url);
+          results.push({
+            action: 'skip_source',
+            detail: srcToSkip?.name || action.source_url,
+            result: error ? `Failed: ${error.message}` : 'Source demoted — will no longer be scraped',
           });
           break;
         }

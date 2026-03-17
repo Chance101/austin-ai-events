@@ -12,7 +12,7 @@ import { scrapeCapitalFactory } from './sources/capitalfactory.js';
 import { scrapeUTAustin } from './sources/utaustin.js';
 import { validateEvent, classifyEvent, extractLocationFromImage } from './utils/claude.js';
 import { findDuplicates, getEventHash } from './utils/dedup.js';
-import { upsertEvent, getExistingEvents, updateEventFields, logAgentRun } from './utils/supabase.js';
+import { upsertEvent, getExistingEvents, updateEventFields, logAgentRun, getSupabase } from './utils/supabase.js';
 import { discoverSources, getTrustedSources, getProbationSources, updateSourceStats, updateSourceValidationStats, getEventSearchQueries } from './discovery/sourceDiscovery.js';
 import { analyzeUnprocessedFeedback } from './feedback/analyzeFeedback.js';
 import { runMonitor } from './monitor.js';
@@ -232,10 +232,24 @@ async function discoverEvents() {
     console.log(`     Skipped today: ${skippedSources.map(s => s.name).join(', ')}`);
   }
 
-  // Start with scheduled config sources (mark them as 'config' tier)
+  // Ensure config sources exist in DB so their stats get tracked
+  const supabase = getSupabase();
+  for (const s of config.sources) {
+    await supabase
+      .from('sources')
+      .upsert({
+        url: s.url,
+        name: s.name,
+        source_type: s.type,
+        trust_tier: 'config',
+        is_active: true,
+      }, { onConflict: 'url', ignoreDuplicates: false });
+  }
+
+  // Start with scheduled config sources
   const allSources = scheduledSources.map(s => ({
     ...s,
-    trust_tier: 'config',  // Config sources are always trusted
+    trust_tier: 'config',
   }));
   const configUrls = new Set(config.sources.map(s => s.url));
 
