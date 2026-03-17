@@ -14,6 +14,15 @@ export interface StewardshipEntry {
 
 export const stewardshipLog: StewardshipEntry[] = [
   {
+    id: 'fix-aicamp-scraper-dates',
+    date: '2026-03-17',
+    title: 'Fix AICamp Scraper: Start Times Not Extracted',
+    problem: 'AICamp scraper returned 44 events per run but ALL had null start_time — the process log\'s first escalation. Root cause: the scraper parsed date text from <a> tags, but AICamp\'s HTML puts dates outside the link in the parent .details div. The detail page fallback also failed because AICamp has no JSON-LD and the regex didn\'t match their format.',
+    action: 'Rewrote listing parser to select .single-popular-carusel card containers and extract dates from the .details div text. Added Google Calendar link parsing on detail pages for precise UTC start/end times. Fixed year detection using event IDs (format W2026050615) instead of fragile month comparison.',
+    result: 'All 44 events now parse with correct start_time. 2 upcoming events (April, May) will reach the calendar. The process log system\'s first escalate_to_human action led directly to this fix.',
+    category: 'learning',
+  },
+  {
     id: 'process-log-system',
     date: '2026-03-17',
     title: 'Process Log: Closing the Feedback Loop',
