@@ -21,6 +21,7 @@ async function gatherMetrics(pipelineData = {}) {
     recentEventsResult,
     queriesResult,
     allEventsCountResult,
+    openActionItemsResult,
     recentReportsResult,
   ] = await Promise.all([
     // Last 30 agent runs
@@ -63,6 +64,13 @@ async function gatherMetrics(pipelineData = {}) {
       .from('events')
       .select('id', { count: 'exact', head: true }),
 
+    // Open human action items (for resolution tracking)
+    supabase
+      .from('human_action_items')
+      .select('id, title, description, severity, category, created_at')
+      .eq('is_resolved', false)
+      .order('created_at', { ascending: false }),
+
     // Previous monitor reports (last 5 for continuity)
     supabase
       .from('monitor_reports')
@@ -77,6 +85,7 @@ async function gatherMetrics(pipelineData = {}) {
   const recentEvents = recentEventsResult.data || [];
   const queries = queriesResult.data || [];
   const totalEvents = allEventsCountResult.count || 0;
+  const openActionItems = openActionItemsResult.data || [];
   const recentReports = recentReportsResult.data || [];
 
   // Compute derived metrics
@@ -197,6 +206,7 @@ async function gatherMetrics(pipelineData = {}) {
     previousActionOutcomes,
     // Layer 1: Decision summary from this run
     decisionSummary: pipelineData.decisionSummary || null,
+    openActionItems: openActionItems.map(i => ({ id: i.id, title: i.title, severity: i.severity, category: i.category, created_at: i.created_at })),
   };
 }
 
@@ -322,7 +332,11 @@ ${JSON.stringify({
     recentRunsSummary: metrics.recentRunsSummary,
     sourcesWithIssues: metrics.sourcesWithIssues,
   }, null, 2)}
-${decisionSummarySection}${recentReportsSection}${actionOutcomesSection}
+${decisionSummarySection}${recentReportsSection}${actionOutcomesSection}${
+    metrics.openActionItems && metrics.openActionItems.length > 0
+      ? `\n## Open Human Action Items (unresolved escalations)\n${JSON.stringify(metrics.openActionItems, null, 2)}\nThese are issues you previously escalated. If the underlying issue has been fixed (based on this run's data), use resolve_action_item to close them.\n`
+      : ''
+  }
 ## Your Task
 Evaluate the system and respond with ONLY valid JSON (no markdown, no code fences):
 
@@ -347,12 +361,13 @@ Evaluate the system and respond with ONLY valid JSON (no markdown, no code fence
   ],
   "auto_actions": [
     {
-      "type": "deactivate_query|create_query|create_source_query|boost_query|flag_source|add_source_context|escalate_to_human",
+      "type": "deactivate_query|create_query|create_source_query|boost_query|flag_source|add_source_context|escalate_to_human|resolve_action_item",
       "detail": "Specific action description",
       "query_text": "for query actions, the exact search string",
       "source_url": "for source actions, the URL",
       "context": "for add_source_context, the validation guidance text",
       "reason": "Why this specific action, not a generic one",
+      "action_item_id": "for resolve_action_item: the UUID from Open Human Action Items",
       "severity": "for escalate_to_human: critical|warning|info",
       "category": "for escalate_to_human: broken_scraper|new_platform|strategy|data_quality",
       "title": "for escalate_to_human: short title for the action item",
@@ -405,6 +420,10 @@ You are the sole query strategist. Every query you create must be purposeful:
 - **escalate_to_human**: Create a persistent action item for issues you can't fix.
   Use for: broken scrapers needing code changes, new platform types, strategic decisions, data quality issues needing manual review.
   Include severity, category, title, description, and suggested_fix.
+
+- **resolve_action_item**: Mark a previously escalated action item as resolved.
+  Use when the underlying issue has been fixed (you can see this in the current run's data).
+  Provide the action_item_id from the "Open Human Action Items" list above.
 
 - Maximum 5 auto-actions per evaluation
 - Before creating a query, check if a similar one exists in the active queries list
@@ -588,6 +607,28 @@ async function executeAutoActions(actions, reportId) {
             action: 'escalate_to_human',
             detail: action.title,
             result: error ? `Failed: ${error.message}` : 'Created action item',
+          });
+          break;
+        }
+
+        case 'resolve_action_item': {
+          if (!action.action_item_id) {
+            results.push({
+              action: 'resolve_action_item',
+              detail: action.detail || 'unknown',
+              result: 'Skipped (missing action_item_id)',
+            });
+            break;
+          }
+          const { error } = await supabase
+            .from('human_action_items')
+            .update({ is_resolved: true, resolved_at: new Date().toISOString() })
+            .eq('id', action.action_item_id)
+            .eq('is_resolved', false);
+          results.push({
+            action: 'resolve_action_item',
+            detail: action.detail || action.action_item_id,
+            result: error ? `Failed: ${error.message}` : 'Resolved',
           });
           break;
         }

@@ -164,13 +164,13 @@ export default function ObservatoryPage() {
         .limit(90);
       setMonitorReports(monitorData || []);
 
-      // Fetch unresolved human action items
+      // Fetch human action items (unresolved + recent resolved)
       const { data: actionItemsData } = await supabase
         .from('human_action_items')
         .select('*')
-        .eq('is_resolved', false)
+        .order('is_resolved', { ascending: true })
         .order('created_at', { ascending: false })
-        .limit(20);
+        .limit(50);
       setHumanActionItems(actionItemsData || []);
 
       // Calculate average events per run and total events added
