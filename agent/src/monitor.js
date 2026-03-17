@@ -107,17 +107,27 @@ async function gatherMetrics(pipelineData = {}) {
     }
   }
 
-  // Calendar coverage: find days in next 30 days with no events
-  const eventDays = new Set();
+  // Calendar coverage: find days with no events in 30-day and 21-day windows
+  const eventDays30 = new Set();
+  const eventDays21 = new Set();
+  const twentyOneDaysOut = new Date(now.getTime() + 21 * 24 * 60 * 60 * 1000);
+  let upcomingCount21 = 0;
   for (const e of upcomingEvents) {
-    const day = new Date(e.start_time).toISOString().split('T')[0];
-    eventDays.add(day);
+    const eventDate = new Date(e.start_time);
+    const day = eventDate.toISOString().split('T')[0];
+    eventDays30.add(day);
+    if (eventDate <= twentyOneDaysOut) {
+      eventDays21.add(day);
+      upcomingCount21++;
+    }
   }
   const emptyDays = [];
+  const emptyDays21 = [];
   for (let i = 0; i < 30; i++) {
     const d = new Date(now.getTime() + i * 24 * 60 * 60 * 1000);
     const dayStr = d.toISOString().split('T')[0];
-    if (!eventDays.has(dayStr)) emptyDays.push(dayStr);
+    if (!eventDays30.has(dayStr)) emptyDays.push(dayStr);
+    if (i < 21 && !eventDays21.has(dayStr)) emptyDays21.push(dayStr);
   }
 
   // Source distribution of upcoming events
@@ -159,8 +169,11 @@ async function gatherMetrics(pipelineData = {}) {
     timestamp: now.toISOString(),
     totalEvents,
     upcomingEventCount: upcomingEvents.length,
+    upcomingEventCount21: upcomingCount21,
     recentEventsAdded: recentEvents.length,
     emptyDays,
+    emptyDays21,
+    contributingSources: Object.keys(sourceDistribution).length,
     sourceDistribution,
     sourcePerformance,
     trustTiers,
@@ -324,9 +337,12 @@ You also have MEMORY across runs. Use the recent reports and action outcomes bel
 ${JSON.stringify({
     timestamp: metrics.timestamp,
     totalEvents: metrics.totalEvents,
-    upcomingEventCount: metrics.upcomingEventCount,
+    upcomingEventCount_30d: metrics.upcomingEventCount,
+    upcomingEventCount_21d: metrics.upcomingEventCount21,
     recentEventsAdded: metrics.recentEventsAdded,
-    emptyDays: metrics.emptyDays,
+    emptyDays_30d: metrics.emptyDays,
+    emptyDays_21d: metrics.emptyDays21,
+    contributingSources: metrics.contributingSources,
     sourceDistribution: metrics.sourceDistribution,
     sourcePerformance: metrics.sourcePerformance,
     trustTiers: metrics.trustTiers,
@@ -386,11 +402,12 @@ Evaluate the system and respond with ONLY valid JSON (no markdown, no code fence
   ]
 }
 
-## Grading Criteria
-- A: 20+ upcoming events, <10 empty days, diverse sources, <5% error rate
-- B: 15-20 upcoming events, <15 empty days, sources mostly healthy
-- C: 10-15 upcoming events, 15-20 empty days, some source issues
-- D: <10 upcoming events, 20+ empty days, multiple broken sources
+## Grading Criteria (based on 21-day window)
+Grade on the 21-day metrics (upcomingEventCount_21d, emptyDays_21d), NOT the 30-day metrics. The 30-day data is for strategic planning only.
+- A: 12+ events in 21 days, <8 empty days, 5+ contributing sources, <5% error rate, no broken scrapers
+- B: 8-11 events in 21 days, <12 empty days, 3-4 contributing sources, <10% error rate
+- C: 4-7 events in 21 days, 12-16 empty days, 2-3 contributing sources, some source issues
+- D: <4 events in 21 days, 16+ empty days, <2 contributing sources, multiple broken scrapers
 - F: System producing no value
 
 ## CRITICAL Guidelines for Findings
@@ -703,7 +720,7 @@ export async function runMonitor(agentRunId = null, pipelineData = {}) {
   // Step 1: Gather metrics (now includes recent reports + action outcomes + decision summary)
   console.log('  Gathering metrics...');
   const metrics = await gatherMetrics(pipelineData);
-  console.log(`  Calendar: ${metrics.upcomingEventCount} upcoming events, ${metrics.emptyDays.length} empty days in next 30`);
+  console.log(`  Calendar: ${metrics.upcomingEventCount21} events in 21d (${metrics.emptyDays21.length} empty), ${metrics.upcomingEventCount} in 30d (${metrics.emptyDays.length} empty)`);
   console.log(`  Sources: ${metrics.activeSources} active, ${metrics.sourcesWithIssues.length} with issues`);
   console.log(`  Last 7 days: ${metrics.runsLast7Days} runs, ${metrics.recentEventsAdded} events added`);
   if (metrics.recentReports.length > 0) {

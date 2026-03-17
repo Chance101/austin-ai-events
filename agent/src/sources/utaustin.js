@@ -91,10 +91,16 @@ export async function scrapeUTAustin(sourceConfig) {
             : `https://ai.utexas.edu${href}`;
 
           // Extract start/end time from <time> tags
+          // NOTE: UT Austin CMS stores local Austin time but tags it as +00:00 (UTC).
+          // We strip the offset and treat the value as Austin local time.
           const times = [];
           $info.find('time.datetime').each((_, t) => {
             const dt = $(t).attr('datetime');
-            if (dt) times.push(dt);
+            if (dt) {
+              // Strip timezone offset, treat as Austin local time
+              const localStr = dt.replace(/[+-]\d{2}:\d{2}$/, '').replace(/Z$/, '');
+              times.push(fromZonedTime(localStr, AUSTIN_TIMEZONE).toISOString());
+            }
           });
           // First time tag is the date, second is start time, third is end time
           const startTime = times[1] || times[0] || null;

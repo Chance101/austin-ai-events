@@ -325,6 +325,68 @@ function PastReportCard({ report, isExpanded, onToggle }: {
   );
 }
 
+function GradingKey() {
+  const [isOpen, setIsOpen] = useState(false);
+
+  const grades = [
+    { grade: 'A', events: '12+', emptyDays: '<8', sources: '5+ contributing', health: '<5% error rate, no broken scrapers' },
+    { grade: 'B', events: '8-11', emptyDays: '8-12', sources: '3-4 contributing', health: '<10% error rate, sources mostly healthy' },
+    { grade: 'C', events: '4-7', emptyDays: '12-16', sources: '2-3 contributing', health: 'Some source issues or elevated errors' },
+    { grade: 'D', events: '<4', emptyDays: '16+', sources: '<2 contributing', health: 'Multiple broken scrapers or high error rate' },
+    { grade: 'F', events: '0', emptyDays: '—', sources: '—', health: 'System producing no value' },
+  ];
+
+  return (
+    <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="flex items-center gap-2 text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
+      >
+        <span>{isOpen ? '▼' : '▶'}</span>
+        <span>Grading Key</span>
+      </button>
+      {isOpen && (
+        <div className="mt-3">
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
+                  <th className="pb-2 pr-3 font-medium">Grade</th>
+                  <th className="pb-2 pr-3 font-medium">Events (21d)</th>
+                  <th className="pb-2 pr-3 font-medium">Empty Days</th>
+                  <th className="pb-2 pr-3 font-medium">Sources</th>
+                  <th className="pb-2 font-medium">System Health</th>
+                </tr>
+              </thead>
+              <tbody>
+                {grades.map(({ grade, events, emptyDays, sources, health }) => {
+                  const colors = gradeColors[grade] || gradeColors.C;
+                  return (
+                    <tr key={grade} className="border-b border-gray-100 dark:border-gray-700/50 last:border-0">
+                      <td className="py-1.5 pr-3">
+                        <span className={`inline-flex items-center justify-center w-6 h-6 rounded text-xs font-bold ${colors.bg} ${colors.text} border ${colors.border}`}>
+                          {grade}
+                        </span>
+                      </td>
+                      <td className="py-1.5 pr-3 text-gray-700 dark:text-gray-300">{events}</td>
+                      <td className="py-1.5 pr-3 text-gray-700 dark:text-gray-300">{emptyDays}</td>
+                      <td className="py-1.5 pr-3 text-gray-700 dark:text-gray-300">{sources}</td>
+                      <td className="py-1.5 text-gray-700 dark:text-gray-300">{health}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-2 text-xs text-gray-400 dark:text-gray-500 italic">
+            Grades are based on a 21-day window. Most community events are posted 2-3 weeks before they happen, so days beyond that naturally have gaps that fill in over time.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const REPORTS_PER_PAGE = 7;
 
 export default function MonitorReport({ reports, loading }: MonitorReportProps) {
@@ -382,6 +444,9 @@ export default function MonitorReport({ reports, loading }: MonitorReportProps) 
       </div>
 
       <ReportContent report={latestReport} />
+
+      {/* Grading Key */}
+      <GradingKey />
 
       {/* Past reports timeline */}
       {pastReports.length > 0 && (

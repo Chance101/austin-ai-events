@@ -85,13 +85,9 @@ export const config = {
       type: 'utaustin',
       scrapeDays: [4],  // Academic calendar, slow-changing
     },
-    {
-      id: 'ai-accelerator',
-      name: 'AI Accelerator Institute',
-      url: 'https://world.aiacceleratorinstitute.com/location/austin/',
-      type: 'aiaccelerator',
-      scrapeDays: [4],  // Rare Austin events
-    },
+    // AI Accelerator Institute removed — conference marketing site using
+    // city pages for SEO. /location/austin/ returns events from San Jose,
+    // Washington, etc. 100% rejection rate, 0 Austin events ever accepted.
     {
       id: 'austin-forum',
       name: 'Austin Forum',
