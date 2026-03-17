@@ -95,13 +95,8 @@ export const config = {
       type: 'austinforum',
       scrapeDays: [4],  // Civic tech, ~2 events/month
     },
-    {
-      id: 'leaders-in-ai',
-      name: 'Leaders in AI Summit',
-      url: 'https://www.leadersinaisummit.com/austin',
-      type: 'leadersinai',
-      scrapeDays: [0],  // Conference, rarely updates
-    },
+    // Leaders in AI Summit removed — annual conference, not a recurring source.
+    // Will be discovered via web search if it returns.
   ],
 };
 
