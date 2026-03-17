@@ -74,7 +74,7 @@ export async function scrapeAustinForum(sourceConfig) {
                 start_time: data.startDate,
                 end_time: data.endDate || null,
                 venue_name: isInPerson ? location.name : 'Online',
-                address: isInPerson ? location.address?.streetAddress : null,
+                address: isInPerson ? [location.address?.streetAddress, location.address?.addressLocality, location.address?.addressRegion].filter(Boolean).join(', ') || null : null,
                 is_free: data.offers?.[0]?.price === 0 || data.isAccessibleForFree,
                 organizer: sourceConfig.name,
                 image_url: data.image,

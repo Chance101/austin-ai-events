@@ -526,7 +526,7 @@ async function discoverEvents() {
       }
 
       if (!validation.isValid || validation.confidence < 0.6) {
-        console.log(`    ❌ Invalid: ${validation.reason}`);
+        console.log(`    ❌ Invalid${event.url ? ` [${event.url}]` : ''}: ${validation.reason}`);
         decisionLog.log({ event: event.title, source: event.source, stage: 'validation', outcome: 'rejected', reason: validation.reason, details: { claudeCalled: !isTrustedSource || locationCheck.isAustin === null, confidence: validation.confidence } });
         continue;
       }

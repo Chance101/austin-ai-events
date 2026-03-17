@@ -39,7 +39,7 @@ async function fetchEventDetails(url) {
               venue_name: item.location?.name,
               address: typeof item.location?.address === 'string'
                 ? item.location.address
-                : item.location?.address?.streetAddress,
+                : [item.location?.address?.streetAddress, item.location?.address?.addressLocality, item.location?.address?.addressRegion].filter(Boolean).join(', ') || null,
               image_url: item.image,
               organizer: item.organizer?.name,
               is_free: item.isAccessibleForFree,
@@ -51,6 +51,35 @@ async function fetchEventDetails(url) {
         // JSON parse error, continue
       }
     });
+
+    // Meetup fallback: if JSON-LD is missing venue, try Apollo state
+    if (url.includes('meetup.com') && eventData && !eventData.venue_name) {
+      try {
+        const nextDataScript = $('script#__NEXT_DATA__').html();
+        if (nextDataScript) {
+          const nextData = JSON.parse(nextDataScript);
+          const apolloState = nextData?.props?.pageProps?.__APOLLO_STATE__;
+          if (apolloState) {
+            // Find venue entries
+            const venues = {};
+            for (const [key, value] of Object.entries(apolloState)) {
+              if (key.startsWith('Venue:') && value) venues[key] = value;
+            }
+            // Find the event and its venue ref
+            for (const [key, value] of Object.entries(apolloState)) {
+              if (key.startsWith('Event:') && value?.venue?.__ref && venues[value.venue.__ref]) {
+                const venue = venues[value.venue.__ref];
+                eventData.venue_name = venue.name;
+                eventData.address = [venue.address, venue.city, venue.state].filter(Boolean).join(', ') || null;
+                break;
+              }
+            }
+          }
+        }
+      } catch (e) {
+        // Apollo state extraction failed, continue with what we have
+      }
+    }
 
     return eventData;
   } catch (error) {
