@@ -216,11 +216,16 @@ async function discoverEvents() {
   const dayOfWeek = today.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
   const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-  const scheduledSources = config.sources.filter(s => {
-    if (!s.scrapeDays) return true; // No schedule = scrape daily
-    return s.scrapeDays.includes(dayOfWeek);
-  });
-  const skippedSources = config.sources.filter(s => s.scrapeDays && !s.scrapeDays.includes(dayOfWeek));
+  const scrapeAll = process.env.SCRAPE_ALL === '1';
+  const scheduledSources = scrapeAll
+    ? config.sources
+    : config.sources.filter(s => {
+        if (!s.scrapeDays) return true; // No schedule = scrape daily
+        return s.scrapeDays.includes(dayOfWeek);
+      });
+  const skippedSources = scrapeAll
+    ? []
+    : config.sources.filter(s => s.scrapeDays && !s.scrapeDays.includes(dayOfWeek));
 
   console.log(`  📅 ${dayNames[dayOfWeek]}: ${scheduledSources.length} sources scheduled, ${skippedSources.length} skipped`);
   if (skippedSources.length > 0) {

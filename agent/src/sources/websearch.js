@@ -30,7 +30,7 @@ async function fetchEventDetails(url) {
         const items = Array.isArray(data) ? data : [data];
 
         for (const item of items) {
-          if (item['@type'] === 'Event') {
+          if (item['@type']?.endsWith('Event')) {
             eventData = {
               title: decodeHtmlEntities(item.name),
               description: decodeHtmlEntities(item.description),

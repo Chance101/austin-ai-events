@@ -76,16 +76,13 @@ export async function scrapeUTAustin(sourceConfig) {
       console.log(`    Found ${events.length} events via JSON-LD`);
     }
 
-    // Fallback: parse the HTML structure
-    // UT Austin events page uses h3 headings with links for event titles
-    // Date format: "March 6, 2026 | 3:30 -4:30pm | RLP 1.104"
+    // Fallback: parse the HTML structure using .event-info containers
     if (events.length === 0) {
-      // Find event entries — look for headings with links to /events/ paths
-      $('h3 a[href*="/events/"], h2 a[href*="/events/"]').each((_, el) => {
+      $('.event-info').each((_, el) => {
         try {
-          const $link = $(el);
-          const title = decodeHtmlEntities($link.text().trim());
-          const href = $link.attr('href');
+          const $info = $(el);
+          const title = decodeHtmlEntities($info.find('h3.event-title').text().trim());
+          const href = $info.find('.event-link a').attr('href');
 
           if (!title || !href) return;
 
@@ -93,18 +90,31 @@ export async function scrapeUTAustin(sourceConfig) {
             ? href
             : `https://ai.utexas.edu${href}`;
 
-          // Look for date/time text near the heading
-          // Walk up to find the container, then look for date text
-          const $container = $link.closest('div, article, section, li') || $link.parent().parent();
-          const containerText = $container.text();
+          // Extract start/end time from <time> tags
+          const times = [];
+          $info.find('time.datetime').each((_, t) => {
+            const dt = $(t).attr('datetime');
+            if (dt) times.push(dt);
+          });
+          // First time tag is the date, second is start time, third is end time
+          const startTime = times[1] || times[0] || null;
+          const endTime = times[2] || null;
 
-          // Parse date from text like "March 6, 2026 | 3:30 -4:30pm | RLP 1.104"
-          // or "March 6, 2026 | 3:30 -4:30pm"
-          const { startTime, endTime, location } = parseDateTimeLocation(containerText);
+          // Extract location from .event-details text after the time tags
+          const detailsText = $info.find('.event-details').text();
+          const locationMatch = detailsText.split('|').pop()?.trim();
+          const location = locationMatch && !locationMatch.match(/\d{4}/) && !locationMatch.match(/\d{1,2}:\d{2}/)
+            ? locationMatch
+            : null;
+
+          // Speaker info
+          const speaker = $info.find('.event-speaker-name').text().trim();
+          const speakerInfo = $info.find('.event-speaker-info').text().trim();
+          const description = speaker ? `Speaker: ${speaker}${speakerInfo ? ` — ${speakerInfo}` : ''}` : null;
 
           events.push({
             title,
-            description: null,
+            description,
             url: fullUrl,
             source: sourceConfig.id,
             source_event_id: extractSourceEventId(fullUrl),
@@ -114,47 +124,10 @@ export async function scrapeUTAustin(sourceConfig) {
             address: 'University of Texas at Austin, Austin, TX',
             is_free: true,
             organizer: 'UT Austin AI',
-            image_url: $container.find('img').attr('src') || null,
+            image_url: $info.find('img').attr('src') ? `https://ai.utexas.edu${$info.find('img').attr('src')}` : null,
           });
         } catch (e) {
           // Parse error for this element
-        }
-      });
-    }
-
-    // If still no events, try broader selectors
-    if (events.length === 0) {
-      // Look for any links to event detail pages
-      $('a[href*="/events/20"]').each((_, el) => {
-        try {
-          const $link = $(el);
-          const title = decodeHtmlEntities($link.text().trim());
-          const href = $link.attr('href');
-
-          if (!title || title.length < 5 || !href) return;
-          // Skip nav/breadcrumb links
-          if (title.toLowerCase() === 'events' || title.toLowerCase() === 'past events') return;
-
-          const fullUrl = href.startsWith('http')
-            ? href
-            : `https://ai.utexas.edu${href}`;
-
-          events.push({
-            title,
-            description: null,
-            url: fullUrl,
-            source: sourceConfig.id,
-            source_event_id: extractSourceEventId(fullUrl),
-            start_time: null,
-            end_time: null,
-            venue_name: null,
-            address: 'University of Texas at Austin, Austin, TX',
-            is_free: true,
-            organizer: 'UT Austin AI',
-            image_url: null,
-          });
-        } catch (e) {
-          // Parse error
         }
       });
     }

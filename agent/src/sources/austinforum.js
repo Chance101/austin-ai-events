@@ -23,18 +23,46 @@ export async function scrapeAustinForum(sourceConfig) {
     const html = await response.text();
     const $ = cheerio.load(html);
 
-    // Find Eventbrite links and extract event info
+    // Find Eventbrite links from the main listing page
     const eventbriteLinks = new Set();
     $('a[href*="eventbrite.com/e/"]').each((_, el) => {
       const href = $(el).attr('href');
       if (href) {
-        // Normalize URL (remove query params for dedup)
         const url = href.split('?')[0];
         eventbriteLinks.add(url);
       }
     });
 
-    console.log(`    [diag] Found ${eventbriteLinks.size} Eventbrite links on page, ${$('a').length} total links`);
+    // Also check individual event detail pages for Eventbrite links
+    // (some events only have the register link on the detail page)
+    const detailPages = new Set();
+    $('a[href*="/events/"]').each((_, el) => {
+      const href = $(el).attr('href') || '';
+      // Match paths like /events/april-7-2026 (month-day-year pattern)
+      if (href.match(/\/events\/[a-z]+-\d{1,2}-\d{4}$/)) {
+        detailPages.add(href.startsWith('http') ? href : `https://www.austinforum.org${href}`);
+      }
+    });
+
+    for (const detailUrl of detailPages) {
+      try {
+        const detailResp = await fetch(detailUrl, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
+        });
+        if (!detailResp.ok) continue;
+        const detailHtml = await detailResp.text();
+        const $detail = cheerio.load(detailHtml);
+        $detail('a[href*="eventbrite.com/e/"]').each((_, el) => {
+          const href = $detail(el).attr('href');
+          if (href) eventbriteLinks.add(href.split('?')[0]);
+        });
+        await new Promise(resolve => setTimeout(resolve, 300));
+      } catch (e) {
+        // Detail page fetch failed, skip
+      }
+    }
+
+    console.log(`    [diag] Found ${eventbriteLinks.size} Eventbrite links (${detailPages.size} detail pages checked), ${$('a').length} total links`);
 
     // For each unique Eventbrite link, try to fetch event details
     for (const eventUrl of eventbriteLinks) {
@@ -54,7 +82,7 @@ export async function scrapeAustinForum(sourceConfig) {
         $event('script[type="application/ld+json"]').each((_, script) => {
           try {
             const data = JSON.parse($event(script).html());
-            if (data['@type'] === 'Event') {
+            if (data['@type']?.endsWith('Event')) {
               // Only include future events
               const startDate = new Date(data.startDate);
               if (startDate < new Date()) return;
