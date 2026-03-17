@@ -509,6 +509,7 @@ async function executeAutoActions(actions, reportId) {
               query_type: queryType,
               priority_score: isSourceQuery ? 1.0 : 0.7,
               is_active: true,
+              created_by: 'agent',
             });
           results.push({
             action: action.type,
