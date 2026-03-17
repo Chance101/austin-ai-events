@@ -14,6 +14,15 @@ export interface StewardshipEntry {
 
 export const stewardshipLog: StewardshipEntry[] = [
   {
+    id: 'process-log-system',
+    date: '2026-03-17',
+    title: 'Process Log: Closing the Feedback Loop',
+    problem: 'The monitor (Opus) operated stateless — it saw aggregate numbers but never learned why events were rejected, whether its past actions worked, or what it said last time. Each evaluation started from scratch with no memory. The result: the monitor observed but didn\'t learn.',
+    action: 'Built a three-layer process log system. Layer 1 (Capture): In-memory RunDecisionLog tracks every accept/reject/duplicate decision during the pipeline with zero API cost, stored as a compact summary on agent_runs. Layer 2 (Remember): Monitor now fetches its last 5 reports and looks up outcomes of queries it created, giving Opus multi-run memory and hypothesis tracking. Layer 3 (Act): Two new auto-actions — add_source_context lets the monitor tune per-source validation prompts (e.g., telling Haiku "this source is always in Austin, focus on AI relevance"), and escalate_to_human creates persistent action items for issues requiring code changes.',
+    result: 'The monitor can now see per-source accept/reject breakdowns, cost efficiency, and rejection reasons. It remembers what it said and did across runs, enabling it to track hypotheses ("did my query work?"), avoid repeating findings, and escalate recurring issues. Auto-action budget increased to 5/run with 4096 max_tokens for richer analysis.',
+    category: 'capability',
+  },
+  {
     id: 'scrape-schedule',
     date: '2026-03-10',
     title: 'Spread Scraping Across the Week',

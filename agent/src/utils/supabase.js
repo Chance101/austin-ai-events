@@ -107,6 +107,7 @@ export async function logAgentRun(stats) {
       claude_api_calls: stats.claudeApiCalls,
       serpapi_calls: stats.serpapiCalls,
       source_results: stats.sourceResults || [],
+      decision_summary: stats.decisionSummary || {},
     })
     .select('id')
     .single();

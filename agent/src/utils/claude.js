@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { config } from '../config.js';
+import { getSupabase } from './supabase.js';
 
 let client = null;
 
@@ -106,7 +107,7 @@ export async function validateEvent(eventData, runStats = null) {
   const currentYear = new Date().getFullYear();
   const nextYear = currentYear + 1;
 
-  const prompt = `You are evaluating whether a potential event is a legitimate, in-person AI/ML event in Austin, TX.
+  let prompt = `You are evaluating whether a potential event is a legitimate, in-person AI/ML event in Austin, TX.
 
 Today's date is: ${today}
 
@@ -155,6 +156,23 @@ IMPORTANT: You MUST verify the location based on venue_name or address fields in
 - If the address shows a city other than Austin (e.g., San Antonio, Houston, Dallas, San Marcos, New Braunfels), reject it
 - Virtual-only events should be rejected (this calendar is for in-person Austin events)
 - "Austin area" or "Greater Austin" is acceptable; cities 50+ miles away are NOT`;
+
+  // Inject per-source validation context if available (set by the monitor)
+  if (eventData._sourceUrl) {
+    try {
+      const db = getSupabase();
+      const { data: sourceRow } = await db
+        .from('sources')
+        .select('validation_context')
+        .eq('url', eventData._sourceUrl)
+        .single();
+      if (sourceRow?.validation_context) {
+        prompt += `\n\n## Source-Specific Context (from system monitor)\n${sourceRow.validation_context}`;
+      }
+    } catch {
+      // Source not in DB or query failed — no context to add, that's fine
+    }
+  }
 
   const message = await anthropic.messages.create({
     model: config.models.fast,

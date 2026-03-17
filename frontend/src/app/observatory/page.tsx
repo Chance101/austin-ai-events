@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { subDays } from 'date-fns';
 import { supabase } from '@/lib/supabase';
-import { AgentRun, Source, SearchQuery, DailyStats } from '@/types/observatory';
+import { AgentRun, Source, SearchQuery, DailyStats, HumanActionItem } from '@/types/observatory';
 import { Event } from '@/types/event';
 
 // Components
@@ -21,6 +21,7 @@ import DecisionLog from '@/components/observatory/DecisionLog';
 import CostTracking from '@/components/observatory/CostTracking';
 import HumanStewardship from '@/components/observatory/HumanStewardship';
 import MonitorReport, { MonitorReportData } from '@/components/observatory/MonitorReport';
+import HumanActionItems from '@/components/observatory/HumanActionItems';
 import PageTracker from '@/components/PageTracker';
 import { ThemeToggle } from '@/components/ThemeToggle';
 
@@ -40,6 +41,7 @@ export default function ObservatoryPage() {
   const [averageEventsPerRun, setAverageEventsPerRun] = useState(0);
   const [totalEventsAdded, setTotalEventsAdded] = useState(0);
   const [monitorReports, setMonitorReports] = useState<MonitorReportData[]>([]);
+  const [humanActionItems, setHumanActionItems] = useState<HumanActionItem[]>([]);
 
   useEffect(() => {
     fetchAllData();
@@ -64,7 +66,7 @@ export default function ObservatoryPage() {
       // Fetch recent runs (for decision log, cost tracking, error log)
       const { data: recentRunsData } = await supabase
         .from('agent_runs')
-        .select('*')
+        .select('*, decision_summary')
         .order('started_at', { ascending: false })
         .limit(30);
       setRecentRuns(recentRunsData || []);
@@ -157,10 +159,19 @@ export default function ObservatoryPage() {
       // Fetch monitor reports
       const { data: monitorData } = await supabase
         .from('monitor_reports')
-        .select('id, created_at, overall_grade, summary, findings, auto_actions')
+        .select('id, created_at, overall_grade, summary, findings, auto_actions, action_review')
         .order('created_at', { ascending: false })
         .limit(90);
       setMonitorReports(monitorData || []);
+
+      // Fetch unresolved human action items
+      const { data: actionItemsData } = await supabase
+        .from('human_action_items')
+        .select('*')
+        .eq('is_resolved', false)
+        .order('created_at', { ascending: false })
+        .limit(20);
+      setHumanActionItems(actionItemsData || []);
 
       // Calculate average events per run and total events added
       const { data: allRunsData } = await supabase
@@ -311,6 +322,15 @@ export default function ObservatoryPage() {
             <CostTracking recentRuns={recentRuns} loading={loading} />
           </div>
         </section>
+
+        {/* ============================================ */}
+        {/* NEEDS ATTENTION (human action items) */}
+        {/* ============================================ */}
+        {(loading || humanActionItems.length > 0) && (
+          <section className="mb-12">
+            <HumanActionItems items={humanActionItems} loading={loading} />
+          </section>
+        )}
 
         {/* ============================================ */}
         {/* HEALTH REPORT */}

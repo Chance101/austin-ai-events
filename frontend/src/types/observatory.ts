@@ -1,3 +1,31 @@
+export interface DecisionSummary {
+  totalDecisions: number;
+  bySource: Record<string, {
+    accepted: number;
+    rejected: number;
+    duplicated: number;
+    updated: number;
+    skipped: number;
+    error: number;
+    reasons: Record<string, number>;
+  }>;
+  byStage: Record<string, number>;
+  topRejectionReasons: Array<{ reason: string; count: number; sources: string[] }>;
+  topDupSources: Array<{ source: string; count: number; layer: string }>;
+  costEfficiency: {
+    bySource: Record<string, {
+      claudeCalls: number;
+      eventsAccepted: number;
+      estCost: number;
+      costPerEvent: number | null;
+    }>;
+    totalClaudeCalls: number;
+    totalEstCost: number;
+    totalEventsAccepted: number;
+    avgCostPerEvent: number | null;
+  };
+}
+
 export interface AgentRun {
   id: string;
   run_type: string;
@@ -18,6 +46,20 @@ export interface AgentRun {
   claude_api_calls: number;
   serpapi_calls: number;
   created_at: string;
+  decision_summary?: DecisionSummary;
+}
+
+export interface HumanActionItem {
+  id: string;
+  created_at: string;
+  resolved_at: string | null;
+  severity: string;
+  category: string;
+  title: string;
+  description: string;
+  suggested_fix: string | null;
+  monitor_report_id: string | null;
+  is_resolved: boolean;
 }
 
 export interface Source {

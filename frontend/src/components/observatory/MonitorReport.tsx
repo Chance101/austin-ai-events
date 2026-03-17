@@ -6,6 +6,7 @@ import { format, formatDistanceToNow } from 'date-fns';
 interface Finding {
   category: string;
   severity: 'critical' | 'warning' | 'info' | 'positive';
+  status?: 'new' | 'recurring' | 'resolved' | 'escalated';
   finding: string;
   recommendation: string | null;
 }
@@ -16,6 +17,12 @@ interface AutoAction {
   result: string;
 }
 
+interface ActionReview {
+  previous_action: string;
+  outcome: string;
+  assessment: string;
+}
+
 export interface MonitorReportData {
   id: string;
   created_at: string;
@@ -23,6 +30,7 @@ export interface MonitorReportData {
   summary: string;
   findings: Finding[];
   auto_actions: AutoAction[];
+  action_review?: ActionReview[];
 }
 
 interface MonitorReportProps {
@@ -45,6 +53,13 @@ const severityConfig: Record<string, { icon: string; bg: string; border: string;
   positive: { icon: '+', bg: 'bg-green-50 dark:bg-green-900/20', border: 'border-green-200 dark:border-green-800', text: 'text-green-800 dark:text-green-200' },
 };
 
+const statusConfig: Record<string, { label: string; bg: string; text: string }> = {
+  new: { label: 'NEW', bg: 'bg-blue-100 dark:bg-blue-900/40', text: 'text-blue-700 dark:text-blue-300' },
+  recurring: { label: 'RECURRING', bg: 'bg-amber-100 dark:bg-amber-900/40', text: 'text-amber-700 dark:text-amber-300' },
+  resolved: { label: 'RESOLVED', bg: 'bg-green-100 dark:bg-green-900/40', text: 'text-green-700 dark:text-green-300' },
+  escalated: { label: 'ESCALATED', bg: 'bg-red-100 dark:bg-red-900/40', text: 'text-red-700 dark:text-red-300' },
+};
+
 const categoryLabels: Record<string, string> = {
   coverage: 'Coverage',
   sources: 'Sources',
@@ -55,6 +70,7 @@ const categoryLabels: Record<string, string> = {
 
 function FindingCard({ finding }: { finding: Finding }) {
   const config = severityConfig[finding.severity] || severityConfig.info;
+  const status = finding.status ? statusConfig[finding.status] : null;
 
   return (
     <div className={`p-3 rounded-lg ${config.bg} border ${config.border}`}>
@@ -63,10 +79,15 @@ function FindingCard({ finding }: { finding: Finding }) {
           {config.icon}
         </span>
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
             <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${config.bg} ${config.text}`}>
               {categoryLabels[finding.category] || finding.category}
             </span>
+            {status && (
+              <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${status.bg} ${status.text}`}>
+                {status.label}
+              </span>
+            )}
           </div>
           <p className="text-sm text-gray-800 dark:text-gray-200">
             {finding.finding}
@@ -82,11 +103,60 @@ function FindingCard({ finding }: { finding: Finding }) {
   );
 }
 
+function ActionReviewSection({ reviews }: { reviews: ActionReview[] }) {
+  return (
+    <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+      <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+        Action Review (learning from past decisions)
+      </h4>
+      <div className="space-y-2">
+        {reviews.map((review, i) => {
+          const isEffective = review.assessment.toLowerCase().includes('effective') && !review.assessment.toLowerCase().includes('ineffective');
+          const isPending = review.assessment.toLowerCase().includes('pending');
+
+          return (
+            <div key={i} className="p-2.5 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
+              <div className="flex items-start gap-2">
+                <span className={`text-xs font-medium px-1.5 py-0.5 rounded shrink-0 ${
+                  isEffective
+                    ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+                    : isPending
+                    ? 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
+                    : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
+                }`}>
+                  {isEffective ? 'Worked' : isPending ? 'Pending' : 'Missed'}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-gray-800 dark:text-gray-200 font-medium truncate">
+                    {review.previous_action}
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    {review.outcome}
+                  </p>
+                  <p className="text-xs text-gray-600 dark:text-gray-300 mt-0.5 italic">
+                    {review.assessment}
+                  </p>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function ReportContent({ report }: { report: MonitorReportData }) {
   const severityOrder = { critical: 0, warning: 1, info: 2, positive: 3 };
   const sortedFindings = [...(report.findings || [])].sort(
     (a, b) => (severityOrder[a.severity] ?? 2) - (severityOrder[b.severity] ?? 2)
   );
+
+  // Count findings by status
+  const statusCounts = sortedFindings.reduce((acc, f) => {
+    if (f.status) acc[f.status] = (acc[f.status] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
 
   return (
     <div>
@@ -96,7 +166,7 @@ function ReportContent({ report }: { report: MonitorReportData }) {
       </p>
 
       {/* Finding counts */}
-      <div className="flex gap-3 mb-4">
+      <div className="flex gap-2 mb-4 flex-wrap">
         {(() => {
           const criticalCount = sortedFindings.filter(f => f.severity === 'critical').length;
           const warningCount = sortedFindings.filter(f => f.severity === 'warning').length;
@@ -116,6 +186,21 @@ function ReportContent({ report }: { report: MonitorReportData }) {
               {positiveCount > 0 && (
                 <span className="text-xs px-2 py-1 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 font-medium">
                   {positiveCount} positive
+                </span>
+              )}
+              {statusCounts.recurring > 0 && (
+                <span className="text-xs px-2 py-1 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 font-medium">
+                  {statusCounts.recurring} recurring
+                </span>
+              )}
+              {statusCounts.resolved > 0 && (
+                <span className="text-xs px-2 py-1 rounded-full bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 font-medium">
+                  {statusCounts.resolved} resolved
+                </span>
+              )}
+              {statusCounts.escalated > 0 && (
+                <span className="text-xs px-2 py-1 rounded-full bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 font-medium">
+                  {statusCounts.escalated} escalated
                 </span>
               )}
             </>
@@ -147,6 +232,11 @@ function ReportContent({ report }: { report: MonitorReportData }) {
             ))}
           </div>
         </div>
+      )}
+
+      {/* Action review */}
+      {report.action_review && report.action_review.length > 0 && (
+        <ActionReviewSection reviews={report.action_review} />
       )}
     </div>
   );
@@ -188,6 +278,31 @@ function PastReportCard({ report, isExpanded, onToggle }: {
                 <span className="text-xs text-gray-500 dark:text-gray-400">
                   {formatReportDate(report.created_at)}
                 </span>
+                {/* Show finding status summary in collapsed view */}
+                {report.findings && (() => {
+                  const escalated = report.findings.filter(f => f.status === 'escalated').length;
+                  const recurring = report.findings.filter(f => f.status === 'recurring').length;
+                  const resolved = report.findings.filter(f => f.status === 'resolved').length;
+                  return (
+                    <>
+                      {escalated > 0 && (
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 font-semibold">
+                          {escalated} escalated
+                        </span>
+                      )}
+                      {recurring > 0 && (
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 font-medium">
+                          {recurring} recurring
+                        </span>
+                      )}
+                      {resolved > 0 && (
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 font-medium">
+                          {resolved} resolved
+                        </span>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
               <p className="text-sm text-gray-700 dark:text-gray-300 truncate">
                 {report.summary}

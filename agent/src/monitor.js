@@ -6,8 +6,9 @@ const supabase = getSupabase();
 
 /**
  * Gather all metrics from the database for evaluation
+ * @param {Object} [pipelineData] - Data passed from the pipeline (decisionSummary, etc.)
  */
-async function gatherMetrics() {
+async function gatherMetrics(pipelineData = {}) {
   const now = new Date();
   const thirtyDaysAgo = new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString();
   const sevenDaysAgo = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -20,6 +21,7 @@ async function gatherMetrics() {
     recentEventsResult,
     queriesResult,
     allEventsCountResult,
+    recentReportsResult,
   ] = await Promise.all([
     // Last 30 agent runs
     supabase
@@ -60,6 +62,13 @@ async function gatherMetrics() {
     supabase
       .from('events')
       .select('id', { count: 'exact', head: true }),
+
+    // Previous monitor reports (last 5 for continuity)
+    supabase
+      .from('monitor_reports')
+      .select('overall_grade, summary, findings, auto_actions, action_review, created_at')
+      .order('created_at', { ascending: false })
+      .limit(5),
   ]);
 
   const recentRuns = recentRunsResult.data || [];
@@ -68,6 +77,7 @@ async function gatherMetrics() {
   const recentEvents = recentEventsResult.data || [];
   const queries = queriesResult.data || [];
   const totalEvents = allEventsCountResult.count || 0;
+  const recentReports = recentReportsResult.data || [];
 
   // Compute derived metrics
   const last7Runs = recentRuns.filter(r =>
@@ -132,6 +142,10 @@ async function gatherMetrics() {
     q.priority_score < 0.2 && q.times_used >= 3
   );
 
+  // --- Layer 2: Previous action outcomes ---
+  // Look up query performance for queries the monitor created in recent reports
+  const previousActionOutcomes = await getActionOutcomes(recentReports, queries);
+
   return {
     timestamp: now.toISOString(),
     totalEvents,
@@ -172,7 +186,59 @@ async function gatherMetrics() {
           ? Math.round(s.validation_pass_count / (s.validation_pass_count + s.validation_fail_count) * 100)
           : null,
       })),
+    // Layer 2: Continuity data
+    recentReports: recentReports.map(r => ({
+      date: r.created_at,
+      grade: r.overall_grade,
+      summary: r.summary,
+      findingCount: (r.findings || []).length,
+      actionsTaken: (r.auto_actions || []).map(a => `${a.action}: ${a.detail} -> ${a.result}`),
+    })),
+    previousActionOutcomes,
+    // Layer 1: Decision summary from this run
+    decisionSummary: pipelineData.decisionSummary || null,
   };
+}
+
+/**
+ * Look up outcomes for queries the monitor created in recent reports.
+ * This lets Opus see whether its past actions were effective.
+ */
+async function getActionOutcomes(recentReports, activeQueries) {
+  const outcomes = [];
+  const activeQueryTexts = new Map(activeQueries.map(q => [q.query_text, q]));
+
+  for (const report of recentReports) {
+    const actions = report.auto_actions || [];
+    for (const action of actions) {
+      if (action.action === 'create_query' || action.action === 'create_source_query') {
+        const queryText = action.detail;
+        const activeQuery = activeQueryTexts.get(queryText);
+
+        if (activeQuery) {
+          outcomes.push({
+            action: `${action.action}: ${queryText}`,
+            createdAt: report.created_at,
+            status: 'active',
+            timesRun: activeQuery.times_run || 0,
+            sourcesFound: activeQuery.sources_found || 0,
+            priority: activeQuery.priority_score,
+          });
+        } else if (action.result && !action.result.startsWith('Skipped')) {
+          outcomes.push({
+            action: `${action.action}: ${queryText}`,
+            createdAt: report.created_at,
+            status: 'deactivated_or_recycled',
+            timesRun: null,
+            sourcesFound: null,
+            priority: null,
+          });
+        }
+      }
+    }
+  }
+
+  return outcomes;
 }
 
 /**
@@ -182,10 +248,45 @@ async function evaluateWithClaude(metrics) {
   const anthropic = getClient();
 
   const today = new Date().toISOString().split('T')[0];
+
+  // Build the decision summary section
+  let decisionSummarySection = '';
+  if (metrics.decisionSummary) {
+    decisionSummarySection = `
+## This Run's Decision Log
+${JSON.stringify(metrics.decisionSummary, null, 2)}
+Per-source accept/reject/duplicate breakdowns, top rejection reasons, cost efficiency per source.
+
+## Cost Efficiency (this run)
+${JSON.stringify(metrics.decisionSummary.costEfficiency || {}, null, 2)}
+Per-source: estimated Claude API cost vs events accepted.
+`;
+  }
+
+  // Build the recent reports section
+  let recentReportsSection = '';
+  if (metrics.recentReports && metrics.recentReports.length > 0) {
+    recentReportsSection = `
+## Recent Reports (last ${metrics.recentReports.length} runs)
+${JSON.stringify(metrics.recentReports, null, 2)}
+Multi-run window: track grade trends, recurring findings, hypothesis outcomes. Use this to avoid repeating the same findings.
+`;
+  }
+
+  // Build the action outcomes section
+  let actionOutcomesSection = '';
+  if (metrics.previousActionOutcomes && metrics.previousActionOutcomes.length > 0) {
+    actionOutcomesSection = `
+## Outcome of Previous Actions
+${JSON.stringify(metrics.previousActionOutcomes, null, 2)}
+Did the queries you created recently produce events? Were they recycled? Use this to learn what works.
+`;
+  }
+
   const prompt = `You are the strategic brain of an automated AI event calendar system (austinai.events). You run on Opus because this is the most important decision point in the system — your analysis drives what the system does next.
 
 ## System Architecture
-- 10 hardcoded scrapers run daily, scraping Austin AI event sources (Lu.ma, Meetup, AICamp, etc.)
+- 10 hardcoded scrapers run on a weekly schedule, scraping Austin AI event sources (Lu.ma, Meetup, AICamp, etc.)
 - Events are validated (is it real? AI-focused? in Austin?) using Haiku (fast model)
 - Events are classified (audience, level) using Haiku
 - Duplicates are detected via fuzzy matching + Haiku semantic comparison
@@ -196,11 +297,32 @@ async function evaluateWithClaude(metrics) {
 ## Your Role
 You are the ONLY entity that creates new search queries. The system no longer auto-generates generic queries. Every query you create should be targeted and strategic, based on specific gaps you identify.
 
+You also have MEMORY across runs. Use the recent reports and action outcomes below to track hypotheses, avoid repeating yourself, and learn from what worked.
+
 ## Today's Date: ${today}
 
 ## Current Metrics
-${JSON.stringify(metrics, null, 2)}
-
+${JSON.stringify({
+    timestamp: metrics.timestamp,
+    totalEvents: metrics.totalEvents,
+    upcomingEventCount: metrics.upcomingEventCount,
+    recentEventsAdded: metrics.recentEventsAdded,
+    emptyDays: metrics.emptyDays,
+    sourceDistribution: metrics.sourceDistribution,
+    sourcePerformance: metrics.sourcePerformance,
+    trustTiers: metrics.trustTiers,
+    avgMetrics: metrics.avgMetrics,
+    runsLast7Days: metrics.runsLast7Days,
+    lastRun: metrics.lastRun,
+    totalSources: metrics.totalSources,
+    activeSources: metrics.activeSources,
+    activeQueries: metrics.activeQueries,
+    staleQueryCount: metrics.staleQueryCount,
+    staleQueryNames: metrics.staleQueryNames,
+    recentRunsSummary: metrics.recentRunsSummary,
+    sourcesWithIssues: metrics.sourcesWithIssues,
+  }, null, 2)}
+${decisionSummarySection}${recentReportsSection}${actionOutcomesSection}
 ## Your Task
 Evaluate the system and respond with ONLY valid JSON (no markdown, no code fences):
 
@@ -211,17 +333,31 @@ Evaluate the system and respond with ONLY valid JSON (no markdown, no code fence
     {
       "category": "coverage|sources|pipeline|cost|reliability",
       "severity": "critical|warning|info|positive",
+      "status": "new|recurring|resolved|escalated",
       "finding": "What you observed — be SPECIFIC, not generic",
       "recommendation": "Actionable next step (or null for positive findings)"
     }
   ],
+  "action_review": [
+    {
+      "previous_action": "description of an action from a previous report",
+      "outcome": "what happened as a result",
+      "assessment": "effective|ineffective|pending — and what to do next"
+    }
+  ],
   "auto_actions": [
     {
-      "type": "deactivate_query|create_query|create_source_query|boost_query|flag_source",
+      "type": "deactivate_query|create_query|create_source_query|boost_query|flag_source|add_source_context|escalate_to_human",
       "detail": "Specific action description",
       "query_text": "for query actions, the exact search string",
       "source_url": "for source actions, the URL",
-      "reason": "Why this specific action, not a generic one"
+      "context": "for add_source_context, the validation guidance text",
+      "reason": "Why this specific action, not a generic one",
+      "severity": "for escalate_to_human: critical|warning|info",
+      "category": "for escalate_to_human: broken_scraper|new_platform|strategy|data_quality",
+      "title": "for escalate_to_human: short title for the action item",
+      "description": "for escalate_to_human: detailed description",
+      "suggested_fix": "for escalate_to_human: what the human should do"
     }
   ]
 }
@@ -234,11 +370,15 @@ Evaluate the system and respond with ONLY valid JSON (no markdown, no code fence
 - F: System producing no value
 
 ## CRITICAL Guidelines for Findings
+- Use the "status" field: "new" for first-time observations, "recurring" if seen in recent reports, "resolved" if a previously flagged issue is now fixed, "escalated" if recurring and worsening
 - Do NOT repeat the same generic observations every day (e.g., "coverage is poor", "3 sources returning zero")
 - If you've flagged an issue before and nothing changed, note it's RECURRING and escalate severity
 - Focus on what's DIFFERENT from previous runs
 - Be specific: name the sources, the dates, the numbers
 - Identify ROOT CAUSES, not symptoms
+
+## action_review
+Review your previous actions (shown in "Outcome of Previous Actions" above). For each, assess whether it was effective and what to do next. This is how you learn.
 
 ## Guidelines for auto_actions (STRATEGIC)
 You are the sole query strategist. Every query you create must be purposeful:
@@ -257,13 +397,22 @@ You are the sole query strategist. Every query you create must be purposeful:
 - **boost_query**: Revive a query that found something before but priority decayed
 - **flag_source**: Flag a broken source with SPECIFIC diagnosis of what's wrong
 
-- Maximum 3 auto-actions per evaluation
+- **add_source_context**: Write per-source guidance to tune validation behavior.
+  Use when a source has a high rejection rate for a predictable, fixable reason.
+  Example: source_url="https://meetup.com/austin-python", context="Events from Austin Python Meetup are always held in Austin, TX. Focus validation on AI/ML relevance, not location."
+  This context gets injected into the Haiku validation prompt for events from that source.
+
+- **escalate_to_human**: Create a persistent action item for issues you can't fix.
+  Use for: broken scrapers needing code changes, new platform types, strategic decisions, data quality issues needing manual review.
+  Include severity, category, title, description, and suggested_fix.
+
+- Maximum 5 auto-actions per evaluation
 - Before creating a query, check if a similar one exists in the active queries list
 - Every query should target a SPECIFIC gap (date range, event type, platform, community)`;
 
   const response = await anthropic.messages.create({
     model: config.models.strategic,
-    max_tokens: 2048,
+    max_tokens: 4096,
     temperature: 0,
     messages: [{ role: 'user', content: prompt }],
   });
@@ -285,10 +434,10 @@ You are the sole query strategist. Every query you create must be purposeful:
 /**
  * Execute safe auto-actions
  */
-async function executeAutoActions(actions) {
+async function executeAutoActions(actions, reportId) {
   const results = [];
 
-  for (const action of (actions || []).slice(0, 3)) {
+  for (const action of (actions || []).slice(0, 5)) {
     try {
       switch (action.type) {
         case 'deactivate_query': {
@@ -394,6 +543,54 @@ async function executeAutoActions(actions) {
           break;
         }
 
+        case 'add_source_context': {
+          if (!action.source_url || !action.context) {
+            results.push({
+              action: 'add_source_context',
+              detail: action.source_url || 'unknown',
+              result: 'Skipped (missing source_url or context)',
+            });
+            break;
+          }
+          const { error } = await supabase
+            .from('sources')
+            .update({ validation_context: action.context })
+            .eq('url', action.source_url);
+          results.push({
+            action: 'add_source_context',
+            detail: action.source_url,
+            result: error ? `Failed: ${error.message}` : `Context set: "${action.context.substring(0, 80)}..."`,
+          });
+          break;
+        }
+
+        case 'escalate_to_human': {
+          if (!action.title || !action.description) {
+            results.push({
+              action: 'escalate_to_human',
+              detail: action.title || 'unknown',
+              result: 'Skipped (missing title or description)',
+            });
+            break;
+          }
+          const { error } = await supabase
+            .from('human_action_items')
+            .insert({
+              severity: action.severity || 'info',
+              category: action.category || 'general',
+              title: action.title,
+              description: action.description,
+              suggested_fix: action.suggested_fix || null,
+              monitor_report_id: reportId || null,
+            });
+          results.push({
+            action: 'escalate_to_human',
+            detail: action.title,
+            result: error ? `Failed: ${error.message}` : 'Created action item',
+          });
+          break;
+        }
+
         default:
           results.push({
             action: action.type,
@@ -416,38 +613,52 @@ async function executeAutoActions(actions) {
 /**
  * Store the report in the database
  */
-async function storeReport(evaluation, metrics, autoActionResults, agentRunId) {
-  const { error } = await supabase
+async function storeReport(evaluation, metrics, autoActionResults, agentRunId, decisionSummary) {
+  const { data, error } = await supabase
     .from('monitor_reports')
     .insert({
       overall_grade: evaluation.overall_grade,
       summary: evaluation.summary,
       findings: evaluation.findings || [],
       auto_actions: autoActionResults || [],
+      action_review: evaluation.action_review || [],
+      decision_summary: decisionSummary || {},
       metrics,
       agent_run_id: agentRunId || null,
-    });
+    })
+    .select('id')
+    .single();
 
   if (error) {
     console.error('Failed to store monitor report:', error.message);
+    return null;
   }
+
+  return data?.id || null;
 }
 
 /**
  * Run the monitor evaluation
  * @param {string|null} agentRunId - UUID of the agent run that triggered this (optional)
+ * @param {Object} [pipelineData] - Data passed from the pipeline (decisionSummary, etc.)
  */
-export async function runMonitor(agentRunId = null) {
+export async function runMonitor(agentRunId = null, pipelineData = {}) {
   console.log('\n' + '='.repeat(50));
   console.log('MONITOR: SYSTEM EVALUATION');
   console.log('='.repeat(50) + '\n');
 
-  // Step 1: Gather metrics
+  // Step 1: Gather metrics (now includes recent reports + action outcomes + decision summary)
   console.log('  Gathering metrics...');
-  const metrics = await gatherMetrics();
+  const metrics = await gatherMetrics(pipelineData);
   console.log(`  Calendar: ${metrics.upcomingEventCount} upcoming events, ${metrics.emptyDays.length} empty days in next 30`);
   console.log(`  Sources: ${metrics.activeSources} active, ${metrics.sourcesWithIssues.length} with issues`);
   console.log(`  Last 7 days: ${metrics.runsLast7Days} runs, ${metrics.recentEventsAdded} events added`);
+  if (metrics.recentReports.length > 0) {
+    console.log(`  Memory: ${metrics.recentReports.length} recent reports, ${metrics.previousActionOutcomes.length} action outcomes tracked`);
+  }
+  if (metrics.decisionSummary) {
+    console.log(`  Decision log: ${metrics.decisionSummary.totalDecisions} decisions from this run`);
+  }
 
   // Step 2: Claude evaluation
   console.log('\n  Evaluating with Claude...');
@@ -455,33 +666,52 @@ export async function runMonitor(agentRunId = null) {
   console.log(`  Grade: ${evaluation.overall_grade}`);
   console.log(`  Summary: ${evaluation.summary}`);
 
-  // Step 3: Execute auto-actions
+  // Step 3: Store report first (to get reportId for escalation actions)
+  console.log('\n  Storing report...');
+  const reportId = await storeReport(evaluation, metrics, [], agentRunId, pipelineData.decisionSummary);
+
+  // Step 4: Execute auto-actions (with reportId for escalation linking)
   let autoActionResults = [];
   if (evaluation.auto_actions && evaluation.auto_actions.length > 0) {
     console.log(`\n  Executing ${evaluation.auto_actions.length} auto-actions...`);
-    autoActionResults = await executeAutoActions(evaluation.auto_actions);
+    autoActionResults = await executeAutoActions(evaluation.auto_actions, reportId);
     for (const result of autoActionResults) {
       console.log(`    ${result.action}: ${result.detail} -> ${result.result}`);
+    }
+
+    // Update the report with action results
+    if (reportId) {
+      await supabase
+        .from('monitor_reports')
+        .update({ auto_actions: autoActionResults })
+        .eq('id', reportId);
     }
   } else {
     console.log('\n  No auto-actions needed.');
   }
 
-  // Step 4: Print findings
+  // Step 5: Print findings
   console.log('\n  Findings:');
   for (const f of evaluation.findings || []) {
     const icon = { critical: '!!!', warning: '!!', info: '--', positive: '++' }[f.severity] || '--';
-    console.log(`    [${icon}] ${f.category}: ${f.finding}`);
+    const status = f.status ? ` [${f.status.toUpperCase()}]` : '';
+    console.log(`    [${icon}]${status} ${f.category}: ${f.finding}`);
     if (f.recommendation) {
       console.log(`         -> ${f.recommendation}`);
     }
   }
 
-  // Step 5: Store report
-  console.log('\n  Storing report...');
-  await storeReport(evaluation, metrics, autoActionResults, agentRunId);
-  console.log('  Report saved.');
+  // Step 5.5: Print action review if present
+  if (evaluation.action_review && evaluation.action_review.length > 0) {
+    console.log('\n  Action Review:');
+    for (const r of evaluation.action_review) {
+      console.log(`    ${r.previous_action}`);
+      console.log(`      Outcome: ${r.outcome}`);
+      console.log(`      Assessment: ${r.assessment}`);
+    }
+  }
 
+  console.log('\n  Report saved.');
   console.log('\n' + '='.repeat(50));
 
   return { evaluation, metrics, autoActionResults };

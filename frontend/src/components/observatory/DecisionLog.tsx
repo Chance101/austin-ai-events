@@ -1,6 +1,6 @@
 'use client';
 
-import { AgentRun } from '@/types/observatory';
+import { AgentRun, DecisionSummary } from '@/types/observatory';
 
 interface DecisionLogProps {
   recentRuns: AgentRun[];
@@ -20,7 +20,145 @@ function formatTimeAgo(dateStr: string): string {
   return `${diffDays}d ago`;
 }
 
+const outcomeColors: Record<string, string> = {
+  accepted: 'text-green-600 dark:text-green-400',
+  rejected: 'text-red-600 dark:text-red-400',
+  duplicated: 'text-gray-500 dark:text-gray-400',
+  updated: 'text-blue-600 dark:text-blue-400',
+  skipped: 'text-amber-600 dark:text-amber-400',
+  error: 'text-red-700 dark:text-red-300',
+};
+
+const stageLabels: Record<string, string> = {
+  pre_filter: 'Pre-filter',
+  dedup_hash: 'Hash dedup',
+  dedup_fuzzy: 'Fuzzy dedup',
+  dedup_claude: 'Claude dedup',
+  location_check: 'Location',
+  validation: 'Validation',
+  classification: 'Classify',
+  upsert: 'Saved',
+};
+
+function SourceBreakdown({ summary }: { summary: DecisionSummary }) {
+  const sources = Object.entries(summary.bySource)
+    .sort((a, b) => {
+      const totalA = a[1].accepted + a[1].rejected + a[1].duplicated + a[1].skipped;
+      const totalB = b[1].accepted + b[1].rejected + b[1].duplicated + b[1].skipped;
+      return totalB - totalA;
+    });
+
+  return (
+    <div className="space-y-2">
+      {sources.map(([source, stats]) => {
+        const total = stats.accepted + stats.rejected + stats.duplicated + stats.updated + stats.skipped + stats.error;
+        const acceptPct = total > 0 ? Math.round((stats.accepted / total) * 100) : 0;
+        const dupPct = total > 0 ? Math.round((stats.duplicated / total) * 100) : 0;
+        const rejectPct = total > 0 ? Math.round(((stats.rejected + stats.skipped) / total) * 100) : 0;
+
+        return (
+          <div key={source} className="p-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs font-medium text-gray-900 dark:text-white truncate">
+                {source}
+              </span>
+              <span className="text-xs text-gray-500 dark:text-gray-400 shrink-0 ml-2">
+                {total} events
+              </span>
+            </div>
+
+            {/* Stacked bar */}
+            <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden flex">
+              {stats.accepted > 0 && (
+                <div className="h-full bg-green-500" style={{ width: `${acceptPct}%` }} title={`${stats.accepted} accepted`} />
+              )}
+              {stats.duplicated > 0 && (
+                <div className="h-full bg-gray-400 dark:bg-gray-500" style={{ width: `${dupPct}%` }} title={`${stats.duplicated} duplicates`} />
+              )}
+              {(stats.rejected + stats.skipped) > 0 && (
+                <div className="h-full bg-red-400" style={{ width: `${rejectPct}%` }} title={`${stats.rejected + stats.skipped} rejected/skipped`} />
+              )}
+            </div>
+
+            {/* Compact stats row */}
+            <div className="flex gap-3 mt-1 text-xs">
+              {stats.accepted > 0 && <span className={outcomeColors.accepted}>{stats.accepted} added</span>}
+              {stats.duplicated > 0 && <span className={outcomeColors.duplicated}>{stats.duplicated} dupes</span>}
+              {stats.rejected > 0 && <span className={outcomeColors.rejected}>{stats.rejected} rejected</span>}
+              {stats.skipped > 0 && <span className={outcomeColors.skipped}>{stats.skipped} skipped</span>}
+              {stats.updated > 0 && <span className={outcomeColors.updated}>{stats.updated} updated</span>}
+            </div>
+
+            {/* Top rejection reasons for this source */}
+            {Object.keys(stats.reasons).length > 0 && (
+              <div className="mt-1 space-y-0.5">
+                {Object.entries(stats.reasons).slice(0, 2).map(([reason, count]) => (
+                  <div key={reason} className="text-xs text-gray-500 dark:text-gray-400 truncate pl-2 border-l-2 border-red-300 dark:border-red-700">
+                    {count}x {reason}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function StageBreakdown({ summary }: { summary: DecisionSummary }) {
+  const stages = Object.entries(summary.byStage)
+    .sort((a, b) => b[1] - a[1]);
+  const maxCount = stages.length > 0 ? stages[0][1] : 1;
+
+  return (
+    <div className="space-y-1.5">
+      {stages.map(([stage, count]) => (
+        <div key={stage} className="flex items-center gap-2">
+          <span className="text-xs text-gray-600 dark:text-gray-400 w-20 shrink-0 truncate">
+            {stageLabels[stage] || stage}
+          </span>
+          <div className="flex-1 h-3 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-indigo-400 dark:bg-indigo-500 rounded-full"
+              style={{ width: `${(count / maxCount) * 100}%` }}
+            />
+          </div>
+          <span className="text-xs font-medium text-gray-900 dark:text-white w-6 text-right">
+            {count}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TopRejections({ summary }: { summary: DecisionSummary }) {
+  if (!summary.topRejectionReasons || summary.topRejectionReasons.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="space-y-1.5">
+      {summary.topRejectionReasons.slice(0, 5).map((r, i) => (
+        <div key={i} className="flex items-start gap-2 text-xs">
+          <span className="font-semibold text-red-600 dark:text-red-400 shrink-0 w-5 text-right">
+            {r.count}x
+          </span>
+          <span className="text-gray-700 dark:text-gray-300 flex-1">
+            {r.reason}
+          </span>
+          <span className="text-gray-400 dark:text-gray-500 shrink-0 text-right">
+            {r.sources.slice(0, 2).join(', ')}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function RunDecisionCard({ run }: { run: AgentRun }) {
+  const summary = run.decision_summary;
   const acceptRate = run.events_validated > 0
     ? Math.round((run.events_added / run.events_validated) * 100)
     : 0;
@@ -32,13 +170,20 @@ function RunDecisionCard({ run }: { run: AgentRun }) {
         <span className="text-xs text-gray-500 dark:text-gray-400">
           {formatTimeAgo(run.started_at)}
         </span>
-        <span className={`text-xs px-2 py-0.5 rounded-full ${
-          run.errors === 0
-            ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
-            : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
-        }`}>
-          {run.errors === 0 ? 'Success' : `${run.errors} errors`}
-        </span>
+        <div className="flex items-center gap-2">
+          {summary && (
+            <span className="text-xs text-gray-500 dark:text-gray-400">
+              {summary.totalDecisions} decisions
+            </span>
+          )}
+          <span className={`text-xs px-2 py-0.5 rounded-full ${
+            run.errors === 0
+              ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
+              : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
+          }`}>
+            {run.errors === 0 ? 'Success' : `${run.errors} errors`}
+          </span>
+        </div>
       </div>
 
       <div className="grid grid-cols-3 gap-2 text-center">
@@ -102,6 +247,10 @@ export default function DecisionLog({ recentRuns, loading }: DecisionLogProps) {
     );
   }
 
+  // Find the latest run with a decision summary
+  const latestWithSummary = recentRuns.find(r => r.decision_summary && r.decision_summary.totalDecisions > 0);
+  const summary = latestWithSummary?.decision_summary;
+
   // Aggregate stats across all runs
   const totals = recentRuns.reduce((acc, run) => ({
     discovered: acc.discovered + (run.events_discovered || 0),
@@ -157,22 +306,46 @@ export default function DecisionLog({ recentRuns, loading }: DecisionLogProps) {
         </div>
       </div>
 
-      {/* Recent runs */}
-      <div className="flex-1 space-y-3 overflow-y-auto">
-        <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">
-          Recent Runs
-        </h4>
-        {recentRuns.slice(0, 5).map((run) => (
-          <RunDecisionCard key={run.id} run={run} />
-        ))}
-      </div>
+      {/* Decision summary from latest run */}
+      {summary ? (
+        <div className="flex-1 space-y-4 overflow-y-auto">
+          {/* Per-source breakdown */}
+          <div>
+            <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              Per-Source Breakdown (latest run)
+            </h4>
+            <SourceBreakdown summary={summary} />
+          </div>
 
-      {/* Future enhancement note */}
-      <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-        <p className="text-xs text-gray-500 dark:text-gray-400 text-center italic">
-          Per-event decision reasoning coming soon
-        </p>
-      </div>
+          {/* Top rejection reasons */}
+          {summary.topRejectionReasons && summary.topRejectionReasons.length > 0 && (
+            <div>
+              <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Top Rejection Reasons
+              </h4>
+              <TopRejections summary={summary} />
+            </div>
+          )}
+
+          {/* Pipeline stage breakdown */}
+          <div>
+            <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              Pipeline Stages
+            </h4>
+            <StageBreakdown summary={summary} />
+          </div>
+        </div>
+      ) : (
+        /* Fallback: recent runs list when no decision summary available */
+        <div className="flex-1 space-y-3 overflow-y-auto">
+          <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">
+            Recent Runs
+          </h4>
+          {recentRuns.slice(0, 5).map((run) => (
+            <RunDecisionCard key={run.id} run={run} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

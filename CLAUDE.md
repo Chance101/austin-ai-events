@@ -101,6 +101,7 @@ austin-ai-events/
 │   │   ├── utils/
 │   │   │   ├── claude.js              # Claude API calls (validation, classification)
 │   │   │   ├── dedup.js               # Fuzzy matching + duplicate detection
+│   │   │   ├── decisionLog.js         # In-memory pipeline decision capture
 │   │   │   └── supabase.js            # Database operations
 │   │   ├── monitor.js                 # Self-monitoring agent (health reports + auto-fix)
 │   │   ├── discovery/
@@ -119,7 +120,11 @@ austin-ai-events/
         ├── 003_data_cleanup.sql        # Initialize trust tiers for existing data
         ├── 004_source_results.sql      # Per-source results JSONB on agent_runs
         ├── 005_monitor_reports.sql     # Self-monitoring health reports table
-        └── 007_add_meetup_enum.sql     # Add 'meetup' event_source enum value
+        ├── 007_add_meetup_enum.sql     # Add 'meetup' event_source enum value
+        ├── 009_decision_log.sql        # Decision summary JSONB on agent_runs
+        ├── 010_monitor_enrichment.sql  # Action review + decision summary on monitor_reports
+        ├── 011_source_context.sql      # Per-source validation context on sources
+        └── 012_human_action_items.sql  # Human escalation action items table
 ```
 
 ## Key Database Schema
@@ -137,14 +142,21 @@ austin-ai-events/
 **Tracking Tables:**
 - `agent_runs`: Discovery run statistics
   - `source_results`: JSONB array of per-source event counts (`[{name, url, events}]`)
+  - `decision_summary`: JSONB with per-source accept/reject/duplicate breakdowns, top rejection reasons, cost efficiency
 - `sources`: Tracked event sources for autonomous discovery
   - `trust_tier`: 'config' | 'trusted' | 'probation' | 'demoted'
   - `validation_pass_count`, `validation_fail_count`: Track event validation outcomes
   - `consecutive_empty_scrapes`: Track scrapes that return no events
   - `promoted_at`, `demoted_at`: Timestamps for tier changes
+  - `validation_context`: Optional text the monitor writes to tune Haiku validation prompts per-source
 - `search_queries`: Web search query logs (max 50 active, priority-based deactivation)
 - `daily_stats`: Aggregated metrics by date
 - `monitor_reports`: Self-evaluation health reports (grade, findings, auto-actions, metrics snapshot)
+  - `action_review`: JSONB array of the monitor's review of its previous actions' outcomes
+  - `decision_summary`: JSONB snapshot of the pipeline's decision log for that run
+- `human_action_items`: Persistent action items escalated by the monitor for human attention
+  - Fields: severity, category, title, description, suggested_fix, is_resolved
+  - Linked to the monitor_report that created them via `monitor_report_id`
 
 ## Development Patterns
 
@@ -274,13 +286,14 @@ Search queries are managed in the `search_queries` table and used for two purpos
 The monitor (`agent/src/monitor.js`) runs automatically as the final phase of every agent run. It evaluates overall system effectiveness and can take safe auto-actions.
 
 **How it works:**
-1. Gathers metrics from Supabase (run history, source performance, calendar coverage, query health)
-2. Sends all metrics to **Opus** (strategic model) for deep evaluation
-3. Receives structured report: letter grade (A-F), categorized findings, and recommended auto-actions
-4. Executes safe auto-actions (max 3 per run), stores report in `monitor_reports` table
+1. **Capture** (Layer 1): `RunDecisionLog` in `utils/decisionLog.js` tracks every accept/reject/duplicate decision during the pipeline in-memory (zero API cost). Summary stored on `agent_runs.decision_summary`.
+2. **Remember** (Layer 2): Gathers metrics from Supabase (run history, source performance, calendar coverage, query health) PLUS last 5 monitor reports and outcomes of previously created queries — giving Opus multi-run memory.
+3. **Evaluate**: Sends all metrics + decision summary + previous reports to **Opus** (strategic model, 4096 max_tokens) for deep evaluation.
+4. **Act** (Layer 3): Receives structured report with letter grade, findings with status tags (new/recurring/resolved/escalated), action review, and auto-actions. Executes up to 5 safe auto-actions per run.
+5. Stores enriched report in `monitor_reports` (includes `action_review` and `decision_summary`).
 
 **Why Opus for the monitor:**
-The monitor is the system's brain — it drives the feedback loop. Opus identifies root causes rather than symptoms, generates targeted queries rather than generic ones, and avoids repeating the same findings daily.
+The monitor is the system's brain — it drives the feedback loop. Opus identifies root causes rather than symptoms, generates targeted queries rather than generic ones, and avoids repeating the same findings daily. With multi-run memory, it can track hypotheses across runs ("I created a query 3 runs ago — did it produce events?").
 
 **Auto-actions (safe, reversible):**
 - `create_query`: Add event-search queries for specific coverage gaps (Opus is the sole query strategist)
@@ -289,6 +302,16 @@ The monitor is the system's brain — it drives the feedback loop. Opus identifi
 - `deactivate_query`: Remove underperforming queries
 - `boost_query`: Increase priority for productive queries
 - `flag_source`: Log concern about a source (no destructive action)
+- `add_source_context`: Write per-source validation guidance injected into the Haiku prompt (stored in `sources.validation_context`). Reversible by setting to NULL.
+- `escalate_to_human`: Create persistent action item in `human_action_items` table for issues requiring code changes (broken scrapers, new platforms, strategic decisions).
+
+**Decision Log (`utils/decisionLog.js`):**
+- In-memory collector — zero DB calls during the pipeline
+- Logs every decision: `{ event, source, stage, outcome, reason, details }`
+- Stages: `pre_filter`, `dedup_hash`, `dedup_fuzzy`, `dedup_claude`, `location_check`, `validation`, `classification`, `upsert`
+- Outcomes: `accepted`, `rejected`, `duplicate`, `updated`, `skipped`, `error`
+- `getSummary()` produces compact aggregate: per-source breakdowns, top rejection reasons, cost efficiency per source
+- Summary stored on `agent_runs.decision_summary` JSONB column
 
 **Monitor → Discovery handoff:**
 When the monitor detects coverage gaps, it creates targeted `create_source_query` actions. These are inserted into `search_queries` with `query_type: 'source_discovery'` and `priority_score: 1.0`. On the next agent run, `discoverSources()` picks them up and searches for new listing pages.
@@ -297,10 +320,10 @@ When the monitor detects coverage gaps, it creates targeted `create_source_query
 Queries are deactivated when: (times_run >= 2 AND sources_found = 0 AND priority < 0.3) OR (times_run >= 5 AND priority < 0.15). ALL queries are eligible, including seed/human-created. This ensures the query table stays clean and unblocked for the monitor's strategic additions.
 
 **What requires human intervention:**
-- Broken scrapers (HTML structure changes)
+- Broken scrapers (HTML structure changes) — monitor can now escalate these to `human_action_items`
 - New scraper types for new platforms
 - Strategic decisions (expand scope, change validation criteria)
-- Validation prompt tuning
+- Validation prompt tuning — monitor can now partially handle this via `add_source_context`
 
 **Run manually:** `cd agent && npm run monitor`
 

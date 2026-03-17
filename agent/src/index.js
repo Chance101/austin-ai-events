@@ -16,6 +16,7 @@ import { upsertEvent, getExistingEvents, updateEventFields, logAgentRun } from '
 import { discoverSources, getTrustedSources, getProbationSources, updateSourceStats, updateSourceValidationStats, getEventSearchQueries } from './discovery/sourceDiscovery.js';
 import { analyzeUnprocessedFeedback } from './feedback/analyzeFeedback.js';
 import { runMonitor } from './monitor.js';
+import { RunDecisionLog } from './utils/decisionLog.js';
 
 /**
  * Create initial run stats object for tracking throughout the pipeline
@@ -162,6 +163,7 @@ async function discoverEvents() {
 
   // Initialize run stats for tracking throughout the pipeline
   const runStats = createRunStats();
+  const decisionLog = new RunDecisionLog();
 
   // Validate configuration
   validateConfig();
@@ -399,12 +401,14 @@ async function discoverEvents() {
         invalidTitlePatterns.some(pattern => pattern.test(titleTrimmed))
       ) {
         console.log(`  ⚠️  Skipping event with invalid title: "${titleTrimmed}"`);
+        decisionLog.log({ event: titleTrimmed, source: event.source, stage: 'pre_filter', outcome: 'skipped', reason: 'Invalid/placeholder title' });
         continue;
       }
 
       // Skip events with malformed titles (CSS, HTML, code, etc.)
       if (isMalformedTitle(titleTrimmed)) {
         console.log(`  ⚠️  Skipping event with malformed title (CSS/code detected): "${titleTrimmed.substring(0, 60)}..."`);
+        decisionLog.log({ event: titleTrimmed, source: event.source, stage: 'pre_filter', outcome: 'skipped', reason: 'Malformed title (CSS/HTML/code)' });
         continue;
       }
 
@@ -440,14 +444,17 @@ async function discoverEvents() {
             try {
               await updateEventFields(existing.id, changes);
               runStats.eventsUpdated++;
+              decisionLog.log({ event: event.title, source: event.source, stage: 'dedup_hash', outcome: 'updated', reason: `Fields changed: ${changeDesc}` });
             } catch (err) {
               console.error(`    Failed to update: ${err.message}`);
             }
           } else {
             runStats.duplicatesSkipped++;
+            decisionLog.log({ event: event.title, source: event.source, stage: 'dedup_hash', outcome: 'duplicate', reason: 'Exact hash match' });
           }
         } else {
           runStats.duplicatesSkipped++;
+          decisionLog.log({ event: event.title, source: event.source, stage: 'dedup_hash', outcome: 'duplicate', reason: 'Exact hash match' });
         }
         continue;
       }
@@ -457,6 +464,7 @@ async function discoverEvents() {
       if (duplicate) {
         console.log(`  ⏭️  Duplicate of existing event: ${duplicate.reason}`);
         runStats.duplicatesSkipped++;
+        decisionLog.log({ event: event.title, source: event.source, stage: 'dedup_fuzzy', outcome: 'duplicate', reason: duplicate.reason });
         continue;
       }
 
@@ -488,10 +496,12 @@ async function discoverEvents() {
         // Trusted source with confirmed Austin location - skip Claude validation
         validation = { isValid: true, confidence: 0.85, reason: 'Trusted source with verified Austin location' };
         console.log(`  ✅ Trusted source, verified Austin: ${event.title?.substring(0, 50)}...`);
+        decisionLog.log({ event: event.title, source: event.source, stage: 'validation', outcome: 'accepted', reason: 'Trusted source, Austin confirmed' });
       } else if (isTrustedSource && locationCheck.isAustin === false) {
         // Trusted source but NOT in Austin - reject without Claude call
         validation = { isValid: false, confidence: 0.9, reason: locationCheck.reason };
         console.log(`  ❌ Trusted source but NOT Austin: ${event.title?.substring(0, 50)}... (${locationCheck.reason})`);
+        decisionLog.log({ event: event.title, source: event.source, stage: 'location_check', outcome: 'rejected', reason: locationCheck.reason });
       } else if (isTrustedSource && locationCheck.isAustin === null) {
         // Trusted source but uncertain location - need Claude to verify
         console.log(`  🔍 Trusted source, uncertain location - validating: ${event.title?.substring(0, 50)}... (${locationCheck.reason})`);
@@ -517,6 +527,7 @@ async function discoverEvents() {
 
       if (!validation.isValid || validation.confidence < 0.6) {
         console.log(`    ❌ Invalid: ${validation.reason}`);
+        decisionLog.log({ event: event.title, source: event.source, stage: 'validation', outcome: 'rejected', reason: validation.reason, details: { claudeCalled: !isTrustedSource || locationCheck.isAustin === null, confidence: validation.confidence } });
         continue;
       }
 
@@ -525,6 +536,7 @@ async function discoverEvents() {
       // Skip events without start_time (required field)
       if (!event.start_time) {
         console.log(`    ⚠️  Skipping (no date): ${event.title?.substring(0, 40)}`);
+        decisionLog.log({ event: event.title, source: event.source, stage: 'pre_filter', outcome: 'skipped', reason: 'No start_time' });
         continue;
       }
 
@@ -558,6 +570,7 @@ async function discoverEvents() {
       const result = await upsertEvent(dbEvent);
       console.log(`    ✅ Added: ${result.title}`);
       runStats.eventsAdded++;
+      decisionLog.log({ event: event.title, source: event.source, stage: 'upsert', outcome: 'accepted', details: { claudeCalled: true } });
 
       // Add to existing events for dedup checking
       existingEvents.push(result);
@@ -603,12 +616,17 @@ async function discoverEvents() {
     await updateSourceValidationStats(sourceValidationStats);
   }
 
+  // 5.6. Attach decision summary to run stats
+  const decisionSummary = decisionLog.getSummary();
+  runStats.decisionSummary = decisionSummary;
+  console.log(`\n📋 Decision log: ${decisionSummary.totalDecisions} decisions recorded`);
+
   // 6. Log run to database
   const agentRunResult = await logAgentRun(runStats);
 
   // 7. Run monitor evaluation
   try {
-    await runMonitor(agentRunResult?.id || null);
+    await runMonitor(agentRunResult?.id || null, { decisionSummary });
   } catch (error) {
     console.error('Monitor evaluation failed:', error.message);
   }
