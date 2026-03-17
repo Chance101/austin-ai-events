@@ -92,13 +92,9 @@ export const config = {
       type: 'aiaccelerator',
       scrapeDays: [4],  // Rare Austin events
     },
-    {
-      id: 'austin-forum',
-      name: 'Austin Forum',
-      url: 'https://www.austinforum.org/events',
-      type: 'austinforum',
-      scrapeDays: [0],  // Rarely has events
-    },
+    // NOTE: Austin Forum removed — 7+ consecutive zero-result runs, monitor escalated
+    // repeatedly. Their events page has no Eventbrite links to scrape. If they start
+    // posting AI events again, they'll be discovered via web search.
     {
       id: 'leaders-in-ai',
       name: 'Leaders in AI Summit',

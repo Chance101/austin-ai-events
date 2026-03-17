@@ -192,6 +192,17 @@ async function addQuery(queryText) {
     return false;
   }
 
+  // Enforce 50-query cap before inserting
+  const { count } = await supabase
+    .from('search_queries')
+    .select('id', { count: 'exact', head: true })
+    .eq('is_active', true);
+
+  if (count >= 50) {
+    console.log(`     Skipped query (at 50 query cap): "${queryText}"`);
+    return false;
+  }
+
   const { error } = await supabase
     .from('search_queries')
     .insert({
