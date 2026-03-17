@@ -361,6 +361,9 @@ async function deactivateFailedQueries() {
 
   let deactivated = 0;
   for (const query of queries) {
+    // Never recycle queries that haven't run yet — give them a chance
+    if (query.times_run === 0) continue;
+
     const shouldDeactivate =
       // Never produced anything and has been tried twice+
       (query.times_run >= 2 && query.sources_found === 0 && query.priority_score < 0.3) ||

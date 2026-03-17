@@ -234,6 +234,15 @@ async function getActionOutcomes(recentReports, activeQueries) {
             sourcesFound: activeQuery.sources_found || 0,
             priority: activeQuery.priority_score,
           });
+        } else if (action.result && action.result.startsWith('Failed')) {
+          outcomes.push({
+            action: `${action.action}: ${queryText}`,
+            createdAt: report.created_at,
+            status: 'failed_to_create',
+            timesRun: null,
+            sourcesFound: null,
+            priority: null,
+          });
         } else if (action.result && !action.result.startsWith('Skipped')) {
           outcomes.push({
             action: `${action.action}: ${queryText}`,
@@ -499,8 +508,10 @@ async function executeAutoActions(actions, reportId) {
             .select('id, query_text, times_run, sources_found, priority_score')
             .eq('is_active', true);
           const recyclable = (staleQueries || []).filter(q =>
-            (q.times_run >= 2 && q.sources_found === 0 && q.priority_score < 0.3) ||
-            (q.times_run >= 5 && q.priority_score < 0.15)
+            q.times_run > 0 && (  // Never recycle unrun queries
+              (q.times_run >= 2 && q.sources_found === 0 && q.priority_score < 0.3) ||
+              (q.times_run >= 5 && q.priority_score < 0.15)
+            )
           );
           if (recyclable.length > 0) {
             for (const q of recyclable) {
