@@ -266,7 +266,7 @@ async function discoverEvents() {
           url: dbSource.url,
           type: mapSourceType(dbSource.source_type),
           fromDb: true,
-          trust_tier: dbSource.trust_tier || 'trusted',
+          trust_tier: dbSource.trust_tier || 'probation',
         });
       }
     }
@@ -507,8 +507,8 @@ async function discoverEvents() {
       // ALWAYS check Austin location first (doesn't use Claude API)
       const locationCheck = checkAustinLocation(event);
 
-      // Skip Claude validation for trusted/config sources, BUT only if location is confirmed Austin
-      const isTrustedSource = event._sourceTier === 'config' || event._sourceTier === 'trusted';
+      // Skip Claude validation for config sources, BUT only if location is confirmed Austin
+      const isTrustedSource = event._sourceTier === 'config';
 
       let validation;
       if (isTrustedSource && locationCheck.isAustin === true) {

@@ -601,33 +601,23 @@ export async function getEventSearchQueries(limit = 2) {
 }
 
 /**
- * Get sources with 'trusted' or 'config' tier from the database
- * These are sources that have earned trust and can skip validation
+ * Get DB sources eligible for scraping (non-config, non-demoted)
+ * Trusted tier is deprecated — all DB sources go through validation.
+ * Returns empty array; all DB sources come through getProbationSources().
  */
 export async function getTrustedSources() {
-  const { data, error } = await supabase
-    .from('sources')
-    .select('*')
-    .in('trust_tier', ['trusted', 'config'])
-    .order('trust_score', { ascending: false });
-
-  if (error) {
-    console.error('Error fetching trusted sources:', error.message);
-    return [];
-  }
-
-  return data || [];
+  return [];
 }
 
 /**
- * Get sources in probation tier (need validation)
- * Limited to 10 per run to control API costs
+ * Get DB-discovered sources eligible for scraping
+ * Returns all non-config, non-demoted sources, limited to 10 per run
  */
 export async function getProbationSources() {
   const { data, error } = await supabase
     .from('sources')
     .select('*')
-    .eq('trust_tier', 'probation')
+    .in('trust_tier', ['probation', 'trusted'])
     .order('trust_score', { ascending: false })
     .limit(10);
 
@@ -705,23 +695,13 @@ export async function updateSourceValidationStats(statsMap) {
       validation_fail_count: newFailCount,
     };
 
-    // Config sources: track stats but don't change tier (auto-skip handles them)
-    if (source.trust_tier !== 'config') {
-      // Check for promotion (probation → trusted)
-      if (source.trust_tier === 'probation' && totalValidated >= 10 && passRate >= 0.8) {
-        updates.trust_tier = 'trusted';
-        updates.is_trusted = true;
-        updates.promoted_at = new Date().toISOString();
-        console.log(`    🎉 Promoted source to trusted: ${source.name} (${Math.round(passRate * 100)}% pass rate)`);
-      }
-
-      // Check for demotion (probation → demoted)
-      if (source.trust_tier === 'probation' && totalValidated >= 10 && passRate < 0.3) {
-        updates.trust_tier = 'demoted';
-        updates.is_trusted = false;
-        updates.demoted_at = new Date().toISOString();
-        console.log(`    ⬇️ Demoted source: ${source.name} (${Math.round(passRate * 100)}% pass rate)`);
-      }
+    // Config sources: track stats but don't change tier (monitor escalates to human)
+    // Probation sources: demote if pass rate is poor after enough data
+    if (source.trust_tier === 'probation' && totalValidated >= 5 && passRate < 0.5) {
+      updates.trust_tier = 'demoted';
+      updates.is_trusted = false;
+      updates.demoted_at = new Date().toISOString();
+      console.log(`    ⬇️ Demoted source: ${source.name} (${Math.round(passRate * 100)}% pass rate after ${totalValidated} events)`);
     }
 
     await supabase.from('sources').update(updates).eq('url', url);

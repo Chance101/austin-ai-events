@@ -654,7 +654,7 @@ async function executeAutoActions(actions, reportId) {
             });
             break;
           }
-          // Only allow skipping non-config sources
+          // Guardrail 1: Only allow skipping non-config sources
           const { data: srcToSkip } = await supabase
             .from('sources')
             .select('trust_tier, name')
@@ -665,6 +665,22 @@ async function executeAutoActions(actions, reportId) {
               action: 'skip_source',
               detail: srcToSkip.name || action.source_url,
               result: 'Blocked: config sources require escalate_to_human',
+            });
+            break;
+          }
+          // Guardrail 2: Don't skip sources that produced accepted events in last 28 days
+          const twentyEightDaysAgo = new Date(Date.now() - 28 * 24 * 60 * 60 * 1000).toISOString();
+          const { count: recentEventCount } = await supabase
+            .from('events')
+            .select('id', { count: 'exact', head: true })
+            .eq('source', 'web-search')
+            .gte('created_at', twentyEightDaysAgo)
+            .ilike('url', `%${new URL(action.source_url).hostname}%`);
+          if (recentEventCount > 0) {
+            results.push({
+              action: 'skip_source',
+              detail: srcToSkip?.name || action.source_url,
+              result: `Blocked: source produced ${recentEventCount} accepted event(s) in last 28 days`,
             });
             break;
           }
