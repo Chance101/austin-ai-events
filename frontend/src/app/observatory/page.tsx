@@ -20,7 +20,7 @@ import SectionHeader from '@/components/observatory/SectionHeader';
 import DecisionLog from '@/components/observatory/DecisionLog';
 import CostTracking from '@/components/observatory/CostTracking';
 import HumanStewardship from '@/components/observatory/HumanStewardship';
-import MonitorReport, { MonitorReportData } from '@/components/observatory/MonitorReport';
+import MonitorReport, { MonitorReportData, GradingKey } from '@/components/observatory/MonitorReport';
 import HumanActionItems from '@/components/observatory/HumanActionItems';
 import PageTracker from '@/components/PageTracker';
 import { ThemeToggle } from '@/components/ThemeToggle';
@@ -341,6 +341,7 @@ export default function ObservatoryPage() {
             subtitle="Automated self-evaluation of system effectiveness"
             icon="🩺"
           />
+          <GradingKey />
           <MonitorReport reports={monitorReports} loading={loading} />
         </section>
 

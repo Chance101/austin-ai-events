@@ -325,7 +325,7 @@ function PastReportCard({ report, isExpanded, onToggle }: {
   );
 }
 
-function GradingKey() {
+export function GradingKey() {
   const [isOpen, setIsOpen] = useState(false);
 
   const grades = [
@@ -337,7 +337,7 @@ function GradingKey() {
   ];
 
   return (
-    <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+    <div className="mb-4">
       <button
         onClick={() => setIsOpen(!isOpen)}
         className="flex items-center gap-2 text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
@@ -444,9 +444,6 @@ export default function MonitorReport({ reports, loading }: MonitorReportProps) 
       </div>
 
       <ReportContent report={latestReport} />
-
-      {/* Grading Key */}
-      <GradingKey />
 
       {/* Past reports timeline */}
       {pastReports.length > 0 && (
