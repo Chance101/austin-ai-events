@@ -144,7 +144,7 @@ austin-ai-events/
   - `source_results`: JSONB array of per-source event counts (`[{name, url, events}]`)
   - `decision_summary`: JSONB with per-source accept/reject/duplicate breakdowns, top rejection reasons, cost efficiency
 - `sources`: Tracked event sources for autonomous discovery
-  - `trust_tier`: 'config' | 'trusted' | 'probation' | 'demoted'
+  - `trust_tier`: 'config' | 'probation' | 'demoted' (trusted tier deprecated — all DB sources stay probation)
   - `validation_pass_count`, `validation_fail_count`: Track event validation outcomes
   - `consecutive_empty_scrapes`: Track scrapes that return no events
   - `promoted_at`, `demoted_at`: Timestamps for tier changes
@@ -213,8 +213,7 @@ import { config } from '../config.js';
 1. **Scraping**: Each source returns `{ title, description, start_time, url, ... }`
    - Sources are scraped on a **weekly schedule** (not daily) to reduce duplicate noise
    - High-update sources (AITX, Austin AI, Capital Factory): 3x/week (Mon/Wed/Fri)
-   - Medium-update sources (AICamp, Meetup groups): 2x/week
-   - Low-update sources (UT Austin, AI Accelerator, Austin Forum, Leaders in AI): 1x/week
+   - Low-update sources (AICamp, Meetup groups, UT Austin, Austin Forum): 1x/week (Thu)
    - Schedule configured via `scrapeDays` in `config.js` (0=Sun through 6=Sat)
    - DB-discovered sources (trusted/probation) still scraped every run
    - Per-source event counts are tracked and logged to `agent_runs.source_results`
@@ -227,40 +226,35 @@ import { config } from '../config.js';
    - Fuzzy match against existing events (Fuse.js with default threshold)
    - Claude semantic analysis for edge cases
 4. **Claude Validation**: Validates structure and event quality (confidence score >= 0.6)
-   - **Trusted/config sources skip validation only if Austin location is confirmed**
-   - Probation sources always validated
+   - **Config sources skip validation only if Austin location is confirmed**
+   - All DB-discovered sources (probation) always validated
 5. **Classification**: Claude assigns audience and technical level
 6. **Upsert**: Insert or update in database, creating agent_run log entry
 
-### Source Trust Tiers
-Sources are assigned trust tiers that determine validation behavior:
+### Source Lifecycle
+Sources have two entry paths and a simple lifecycle:
 
-**Tier Levels:**
-- `config`: Hardcoded sources in `config.js` - always trusted, never demoted
-- `trusted`: Earned trust through consistent quality - skip Claude validation (if Austin confirmed)
-- `probation`: New/unproven sources - require Claude validation for every event
-- `demoted`: Poor performers - excluded from scraping
+**Entry Paths:**
+- `config`: Manually added to `config.js` — proven, recurring community sources (8 total). Always scraped on schedule. Monitor cannot skip these autonomously; must `escalate_to_human` if issues arise.
+- `probation`: Discovered by web search — enter the `sources` DB table and must prove themselves through validation.
 
-**Validation Logic for Trusted Sources:**
-- Austin location confirmed → skip Claude validation (cost savings)
-- NOT in Austin → reject immediately (no API call)
-- No location data → use Claude to verify (safety)
+**Lifecycle of DB-discovered sources:**
+```
+Web search finds URL → PROBATION (every event validated by Claude)
+  → 5+ validated events with <50% pass rate → DEMOTED (never scraped again)
+  → 5 consecutive empty scrapes → DEMOTED
+  → Monitor uses skip_source → DEMOTED
+  → If source becomes active again → web search rediscovers it fresh
+```
 
-**Promotion/Demotion Logic:**
-- New discovered sources start in `probation`
-- Promoted to `trusted` after 10+ validated events with 80%+ pass rate
-- Demoted after 10+ validated events with <30% pass rate
-- Demoted after 5 consecutive empty scrapes
+**Config source stats are tracked in the DB** (upserted on startup) so the monitor has data to evaluate them. Config sources that fail get escalated to the human for review, not auto-skipped.
 
-**Cost Optimization:**
-- Trusted sources skip ~$0.01-0.02 per event in Claude API calls
-- Only probation sources incur validation costs
-- Expected daily cost: ~$0.50-0.75 (down from ~$1.50)
+**SCRAPE_ALL=1**: Environment variable bypasses the weekly schedule, scraping all config sources. Useful for debugging.
 
 **Key Functions in `sourceDiscovery.js`:**
-- `getTrustedSources()`: Returns config + trusted tier sources
-- `getProbationSources()`: Returns up to 10 probation sources per run
-- `updateSourceValidationStats()`: Handles promotion/demotion logic
+- `getProbationSources()`: Returns up to 10 non-config, non-demoted DB sources per run
+- `updateSourceValidationStats()`: Tracks pass/fail counts, demotes at <50% after 5 events
+- `updateSourceStats()`: Tracks consecutive empty scrapes, demotes at 5
 - `isBroadSearchUrl()`: Filters garbage URLs (meetup.com/find/, eventbrite.com/d/, etc.)
 - `getEventSearchQueries()`: Returns query strings for direct event search (oldest `last_run` first for rotation)
 - `getActiveQueries()`: Returns queries for source discovery using exploration budget strategy
@@ -292,6 +286,14 @@ The monitor (`agent/src/monitor.js`) runs automatically as the final phase of ev
 4. **Act** (Layer 3): Receives structured report with letter grade, findings with status tags (new/recurring/resolved/escalated), action review, and auto-actions. Executes up to 5 safe auto-actions per run.
 5. Stores enriched report in `monitor_reports` (includes `action_review` and `decision_summary`).
 
+**Grading (21-day window):**
+The monitor grades on a 21-day window (not 30) because community events are typically posted 2-3 weeks out. The 30-day data is still gathered for strategic planning.
+- A: 12+ events, <8 empty days, 5+ contributing sources, <5% error rate
+- B: 8-11 events, <12 empty days, 3-4 contributing sources
+- C: 4-7 events, 12-16 empty days, some source issues
+- D: <4 events, 16+ empty days, multiple broken sources
+- F: System producing no value
+
 **Why Opus for the monitor:**
 The monitor is the system's brain — it drives the feedback loop. Opus identifies root causes rather than symptoms, generates targeted queries rather than generic ones, and avoids repeating the same findings daily. With multi-run memory, it can track hypotheses across runs ("I created a query 3 runs ago — did it produce events?").
 
@@ -303,7 +305,9 @@ The monitor is the system's brain — it drives the feedback loop. Opus identifi
 - `boost_query`: Increase priority for productive queries
 - `flag_source`: Log concern about a source (no destructive action)
 - `add_source_context`: Write per-source validation guidance injected into the Haiku prompt (stored in `sources.validation_context`). Reversible by setting to NULL.
+- `skip_source`: Demote a DB-discovered source that is no longer producing value. Guardrails: (1) blocked for config sources — must use `escalate_to_human` instead, (2) blocked if source produced accepted events in last 28 days.
 - `escalate_to_human`: Create persistent action item in `human_action_items` table for issues requiring code changes (broken scrapers, new platforms, strategic decisions).
+- `resolve_action_item`: Mark a previously escalated action item as resolved when the underlying issue is fixed.
 
 **Decision Log (`utils/decisionLog.js`):**
 - In-memory collector — zero DB calls during the pipeline
@@ -320,10 +324,11 @@ When the monitor detects coverage gaps, it creates targeted `create_source_query
 Queries are deactivated when: (times_run >= 2 AND sources_found = 0 AND priority < 0.3) OR (times_run >= 5 AND priority < 0.15). ALL queries are eligible, including seed/human-created. This ensures the query table stays clean and unblocked for the monitor's strategic additions.
 
 **What requires human intervention:**
-- Broken scrapers (HTML structure changes) — monitor can now escalate these to `human_action_items`
+- Config source issues — monitor escalates but cannot skip config sources autonomously
+- Broken scrapers (HTML structure changes) — monitor escalates to `human_action_items`
 - New scraper types for new platforms
 - Strategic decisions (expand scope, change validation criteria)
-- Validation prompt tuning — monitor can now partially handle this via `add_source_context`
+- Validation prompt tuning — monitor can partially handle via `add_source_context`
 
 **Run manually:** `cd agent && npm run monitor`
 
@@ -340,8 +345,8 @@ Queries are deactivated when: (times_run >= 2 AND sources_found = 0 AND priority
   - Haiku handles validation, classification, dedup (~80% of calls, cheapest)
   - Sonnet handles source evaluation, image analysis (moderate)
   - Opus handles monitor evaluation (1 call/run, most expensive but highest leverage)
-  - Trusted/config sources skip validation entirely
-  - Only probation sources incur validation costs
+  - Config sources skip validation when Austin location is confirmed
+  - All DB-discovered sources go through validation
 - **SerpAPI**: Free tier covers ~5 searches/day (budget: 3 source discovery + 2 event search)
 - Agent includes 500ms delay between event processing to respect rate limits
 

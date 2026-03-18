@@ -14,6 +14,33 @@ export interface StewardshipEntry {
 
 export const stewardshipLog: StewardshipEntry[] = [
   {
+    id: 'source-lifecycle-overhaul',
+    date: '2026-03-17',
+    title: 'Source Lifecycle Overhaul: Monitor-Driven Management',
+    problem: 'Two config sources (AI Accelerator Institute, Leaders in AI Summit) were wasting resources every run — one was a marketing site returning events from wrong cities, the other a finished conference. Config sources were immune to all demotion logic, requiring manual code edits to remove. The trusted tier added complexity for minimal cost savings (~$0.03/month). Demotion thresholds were too slow (10 events, 30% pass rate) to catch obviously bad sources.',
+    action: 'Removed trusted tier entirely — all DB sources stay on probation and go through validation. Tightened demotion: 5 validated events (was 10), 50% pass rate (was 30%). Added skip_source monitor action for DB sources with two guardrails: blocked for config sources (must escalate to human), blocked if source produced events in last 28 days (prevents dry spell false positives). Config sources now tracked in DB so monitor has stats to evaluate them. Removed AI Accelerator and Leaders in AI from config.',
+    result: 'Source lifecycle is now three-tier: config (human-managed), probation (auto-demoted if bad), demoted (dead). Bad sources get caught in 5 events instead of 10. The monitor can autonomously skip DB sources but must escalate config source issues to humans — matching the pattern that already worked when the human proactively flagged AI Accelerator and Leaders in AI.',
+    category: 'capability',
+  },
+  {
+    id: 'scraper-venue-fixes',
+    date: '2026-03-17',
+    title: 'Fix False Rejections: Venue Extraction + Eventbrite JSON-LD',
+    problem: 'Multiple legitimate Austin AI events were being rejected for "no venue/address provided." Three root causes discovered through manual review: (1) websearch.js and austinforum.js only extracted streetAddress from JSON-LD, ignoring city/state fields. (2) Eventbrite changed from @type "Event" to subtypes like "SocialEvent" — our scrapers checked for exact match. (3) Austin Forum had Eventbrite links on detail pages that the main listing scraper never followed. (4) UT Austin scraper couldn\'t find event titles or dates due to changed HTML structure, and its CMS stores local time tagged as UTC.',
+    action: 'Fixed address extraction to use [streetAddress, addressLocality, addressRegion]. Updated JSON-LD matching to accept any @type ending in "Event". Added detail page crawling to Austin Forum scraper. Rewrote UT Austin scraper to use .event-info containers with <time> tags. Fixed timezone conversion using fromZonedTime for UT Austin\'s mislabeled UTC timestamps. Added Meetup Apollo state fallback in websearch.js when JSON-LD has no venue.',
+    result: 'Austin Forum now finds all 3 upcoming events (was 0). UT Austin produces 5 events with correct times (was 0). "The Great AI Debate" and "GenAI 2.0 Launch Party" now have full venue data. 6 new events added on the first full run after fixes.',
+    category: 'learning',
+  },
+  {
+    id: 'monitor-grading-recalibration',
+    date: '2026-03-17',
+    title: 'Recalibrate Monitor Grading to 21-Day Window',
+    problem: 'Monitor was grading on a 30-day rolling window, but Austin produces ~20 AI events/month and organizers post 2-3 weeks out. Week 4 of the window was always empty — not because the system failed, but because events hadn\'t been posted yet. This permanently deflated grades (stuck at D/C even when the system was working correctly).',
+    action: 'Changed grading to a 21-day window: A=12+ events, B=8-11, C=4-7, D=<4. The 30-day data is still gathered for strategic planning (monitor uses it to create forward-looking queries). Added a collapsible grading key to the Observatory health report explaining what each grade means and why the 21-day window is used.',
+    result: 'Grades now reflect actual system performance. Current state (13 events in 21 days) correctly evaluates as C instead of the old D. The grade will naturally climb to B/A as April events get posted, without code changes.',
+    category: 'optimization',
+  },
+  {
     id: 'fix-aicamp-scraper-dates',
     date: '2026-03-17',
     title: 'Fix AICamp Scraper: Start Times Not Extracted',
