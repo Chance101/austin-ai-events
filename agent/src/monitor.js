@@ -403,6 +403,9 @@ Evaluate the system and respond with ONLY valid JSON (no markdown, no code fence
 }
 
 ## Grading Criteria (based on 21-day window)
+The grade measures CALENDAR HEALTH — how well the calendar serves users right now.
+It does NOT measure how well the last run performed. A run that adds 0 events but the calendar already has 15 events is still an A-grade calendar.
+Use the 21-day metrics to determine the grade. Pipeline issues, cost waste, and source problems belong in your findings — they explain what to fix, not what grade to give.
 Grade on the 21-day metrics (upcomingEventCount_21d, emptyDays_21d), NOT the 30-day metrics. The 30-day data is for strategic planning only.
 - A: 12+ events in 21 days, <8 empty days, 5+ contributing sources, <5% error rate, no broken scrapers
 - B: 8-11 events in 21 days, <12 empty days, 3-4 contributing sources, <10% error rate
