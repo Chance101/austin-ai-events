@@ -324,7 +324,7 @@ Did the queries you created recently produce events? Were they recycled? Use thi
 - Duplicates are detected via fuzzy matching + Haiku semantic comparison
 - Web search (SerpAPI, 5 calls/day) finds new event sources and individual events
 - Search queries in the database drive what gets searched — you control these queries
-- The query table has a 50-query cap. Underperforming queries are now aggressively recycled.
+- Queries with priority below 0.05 are automatically recycled. No cap on active queries — recycling keeps the table clean.
 
 ## Your Role
 You are the ONLY entity that creates new search queries. The system no longer auto-generates generic queries. Every query you create should be targeted and strategic, based on specific gaps you identify.
@@ -522,36 +522,6 @@ async function executeAutoActions(actions, reportId) {
               action: action.type,
               detail: action.query_text,
               result: 'Skipped (already exists)',
-            });
-            break;
-          }
-          // Recycle underperforming queries before checking the cap
-          const { data: staleQueries } = await supabase
-            .from('search_queries')
-            .select('id, query_text, times_run, sources_found, priority_score')
-            .eq('is_active', true);
-          const recyclable = (staleQueries || []).filter(q =>
-            q.times_run > 0 && (  // Never recycle unrun queries
-              (q.times_run >= 2 && q.sources_found === 0 && q.priority_score < 0.3) ||
-              (q.times_run >= 5 && q.priority_score < 0.15)
-            )
-          );
-          if (recyclable.length > 0) {
-            for (const q of recyclable) {
-              await supabase.from('search_queries').update({ is_active: false }).eq('id', q.id);
-            }
-            console.log(`    Recycled ${recyclable.length} underperforming queries to make room`);
-          }
-          // Check active query count
-          const { count } = await supabase
-            .from('search_queries')
-            .select('id', { count: 'exact', head: true })
-            .eq('is_active', true);
-          if (count >= 50) {
-            results.push({
-              action: action.type,
-              detail: action.query_text,
-              result: 'Skipped (at 50 query cap)',
             });
             break;
           }

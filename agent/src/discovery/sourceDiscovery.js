@@ -345,9 +345,9 @@ async function updateQueryStats(queryId, sourcesFound) {
 /**
  * Deactivate underperforming queries — applies to ALL queries including seed.
  * A query is deactivated if:
- * - times_run >= 2 AND sources_found = 0 AND priority_score < 0.3
+ * - priority_score < 0.05 (decayed to near-zero — served its purpose regardless of past results)
  * OR
- * - times_run >= 5 AND priority_score < 0.15 (even if it found something once)
+ * - times_run >= 2 AND sources_found = 0 AND priority_score < 0.3 (tried and found nothing)
  *
  * No query gets a permanent free pass — if it's not producing, it goes.
  */
@@ -365,10 +365,10 @@ async function deactivateFailedQueries() {
     if (query.times_run === 0) continue;
 
     const shouldDeactivate =
+      // Priority has decayed to near-zero — whatever it found is already in the system
+      query.priority_score < 0.05 ||
       // Never produced anything and has been tried twice+
-      (query.times_run >= 2 && query.sources_found === 0 && query.priority_score < 0.3) ||
-      // Has been run enough and priority has decayed well below useful
-      (query.times_run >= 5 && query.priority_score < 0.15);
+      (query.times_run >= 2 && query.sources_found === 0 && query.priority_score < 0.3);
 
     if (shouldDeactivate) {
       await supabase
