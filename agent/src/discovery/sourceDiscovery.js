@@ -401,7 +401,9 @@ export async function discoverSources(runStats = null) {
   };
 
   // Get active queries and known sources
-  const queries = await getActiveQueries(3);
+  // Budget: 1 source discovery + 2 event search = 3 SerpAPI calls/day
+  // Reduced from 3 — source ecosystem is well-mapped, event search is higher ROI
+  const queries = await getActiveQueries(1);
   const knownUrls = await getKnownSourceUrls();
   const discoveredSources = [];
 

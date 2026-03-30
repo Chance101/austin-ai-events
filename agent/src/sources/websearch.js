@@ -128,17 +128,18 @@ export async function searchEvents(queries = [], runStats = null) {
       // Process organic results
       if (results.organic_results) {
         for (const result of results.organic_results) {
-          // Filter for event-like pages
+          const link = result.link;
+          // Filter for event-like pages (individual events, not listing/index pages)
           const isEventPage =
-            result.link.includes('meetup.com/') ||
-            result.link.includes('eventbrite.com/') ||
-            result.link.includes('lu.ma/') ||
-            result.link.includes('/event') ||
-            result.link.includes('/events');
+            link.includes('meetup.com/') ||
+            link.includes('eventbrite.com/e/') ||
+            link.includes('lu.ma/') ||
+            link.match(/\/events?\/[^/?]/) // /event/slug or /events/slug, not bare /events/
+          ;
 
           if (isEventPage) {
             urlsToFetch.push({
-              url: result.link,
+              url: link,
               fallback: {
                 title: result.title,
                 description: result.snippet,
@@ -176,14 +177,16 @@ export async function searchEvents(queries = [], runStats = null) {
             source: 'web-search',
             source_event_id: null,
           });
-        } else {
-          // Fall back to search result data (no end_time)
+        } else if (item.fallback.title && item.fallback.title.trim().length >= 10 && item.fallback.start_time) {
+          // Fall back to search result data only if it has a real title and date
           events.push({
             ...item.fallback,
             url: item.url,
             source: 'web-search',
             source_event_id: null,
           });
+        } else {
+          // Skip — search snippet lacks enough data to be a useful event candidate
         }
 
         // Rate limit between page fetches

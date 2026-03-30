@@ -268,7 +268,7 @@ Search queries are managed in the `search_queries` table and used for two purpos
 1. **Source discovery** (`discoverSources()`): 3 queries/run, finds new listing pages
 2. **Event search** (`searchEvents()`): 2 queries/run, finds individual events directly
 
-- **SerpAPI budget**: 5 searches/day total (3 source discovery + 2 event search)
+- **SerpAPI budget**: 3 searches/day total (1 source discovery + 2 event search)
 - **Deduplication**: New queries checked against existing before insert
 - **Cap**: Maximum 50 active queries at any time
 - **Query creation**: Only the Opus monitor creates new queries (no auto-generation)
@@ -347,7 +347,7 @@ Queries are deactivated when: (times_run >= 2 AND sources_found = 0 AND priority
   - Opus handles monitor evaluation (1 call/run, most expensive but highest leverage)
   - Config sources skip validation when Austin location is confirmed
   - All DB-discovered sources go through validation
-- **SerpAPI**: Free tier covers ~5 searches/day (budget: 3 source discovery + 2 event search)
+- **SerpAPI**: Free tier covers ~5 searches/day (budget: 1 source discovery + 2 event search = 3/day)
 - Agent includes 500ms delay between event processing to respect rate limits
 
 ### Frontend ISR

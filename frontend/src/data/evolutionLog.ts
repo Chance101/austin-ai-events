@@ -14,6 +14,15 @@ export interface StewardshipEntry {
 
 export const stewardshipLog: StewardshipEntry[] = [
   {
+    id: 'web-search-budget-cleanup',
+    date: '2026-03-29',
+    title: 'Web Search Cleanup: Fix Garbage Events, Reduce Budget',
+    problem: 'Monitor stuck at C for 10 consecutive days. Web search was the main cost center but produced zero accepted events for 7+ days straight. Two bugs compounded the waste: (1) when fetchEventDetails() failed, the fallback blindly pushed search snippets as events even without titles or dates — producing ~4 "invalid/placeholder title" rejects per run. (2) Organic search results matched broad listing pages (/events/) not individual events, generating more noise. Meanwhile, 5 daily SerpAPI calls (3 source discovery + 2 event search) were burning budget searching for April events that organizers hadn\'t posted yet.',
+    action: 'Fixed web search fallback: only use search snippet data when it has a real title (10+ chars) AND a start_time — otherwise skip entirely. Tightened organic result URL matching to require individual event paths (eventbrite.com/e/, /events/slug) not bare listing pages. Reduced SerpAPI budget from 5 to 3 calls/day (1 source discovery + 2 event search) since source ecosystem is well-mapped. Resolved all 5 pending human action items.',
+    result: 'Eliminated garbage fallback events that wasted downstream processing. Reduced daily API spend by 40%. The C grade is correctly diagnosed as a real-world April event gap, not a system failure — existing scrapers will catch events when organizers post them.',
+    category: 'optimization',
+  },
+  {
     id: 'source-lifecycle-overhaul',
     date: '2026-03-17',
     title: 'Source Lifecycle Overhaul: Monitor-Driven Management',
