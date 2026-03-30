@@ -61,11 +61,13 @@ austin-ai-events/
 │   │   │   ├── page.tsx               # Main calendar + filters
 │   │   │   ├── observatory/page.tsx   # Analytics dashboard
 │   │   │   ├── api/track/route.ts     # Visitor tracking endpoint
+│   │   │   ├── api/feedback/route.ts  # User feedback API endpoint
 │   │   │   └── layout.tsx             # Root layout
 │   │   ├── components/
 │   │   │   ├── EventCard.tsx          # Event display
 │   │   │   ├── EventFilters.tsx       # Filter controls (client-side)
 │   │   │   ├── EventModal.tsx         # Event details modal
+│   │   │   ├── FeedbackButton.tsx     # "Missing an event?" user feedback form
 │   │   │   ├── PageTracker.tsx        # Analytics (Vercel)
 │   │   │   └── observatory/           # Three-layer observability dashboard
 │   │   │       ├── (Agent Performance) # LastRunCard, PerformanceChart, SystemHealth, etc.
@@ -86,6 +88,7 @@ austin-ai-events/
 │   ├── src/
 │   │   ├── index.js                   # Main orchestrator
 │   │   ├── config.js                  # Source definitions + validation
+│   │   ├── config.test.js             # Config validation tests
 │   │   ├── sources/                   # Event scrapers
 │   │   │   ├── meetup.js              # GraphQL scraping
 │   │   │   ├── luma.js                # JSON-LD extraction
@@ -97,11 +100,16 @@ austin-ai-events/
 │   │   │   ├── aicamp.js              # AICamp Austin meetups
 │   │   │   ├── capitalfactory.js      # Capital Factory tech hub
 │   │   │   ├── utaustin.js            # UT Austin AI research events
-│   │   │   └── websearch.js           # SerpAPI + event enrichment
+│   │   │   ├── websearch.js           # SerpAPI + event enrichment
+│   │   │   └── websearch.test.js      # URL matching tests
 │   │   ├── utils/
 │   │   │   ├── claude.js              # Claude API calls (validation, classification)
 │   │   │   ├── dedup.js               # Fuzzy matching + duplicate detection
+│   │   │   ├── dedup.test.js          # Dedup unit tests
 │   │   │   ├── decisionLog.js         # In-memory pipeline decision capture
+│   │   │   ├── errors.js              # Scraper error classification (transient/structural/permanent)
+│   │   │   ├── filters.js             # Austin location check + malformed title detection
+│   │   │   ├── filters.test.js        # Filter unit tests
 │   │   │   └── supabase.js            # Database operations
 │   │   ├── monitor.js                 # Self-monitoring agent (health reports + auto-fix)
 │   │   ├── discovery/
@@ -156,7 +164,13 @@ austin-ai-events/
   - `decision_summary`: JSONB snapshot of the pipeline's decision log for that run
 - `human_action_items`: Persistent action items escalated by the monitor for human attention
   - Fields: severity, category, title, description, suggested_fix, is_resolved
+  - Outer loop fields: `action_type`, `affected_files`, `auto_fixable`, `attempt_count`, `last_attempt_at`, `repair_commit`, `repair_status` ('pending' | 'attempted' | 'failed' | 'verified')
   - Linked to the monitor_report that created them via `monitor_report_id`
+- `repair_log`: Tracks outer loop fix attempts
+  - Fields: `action_item_id`, `commit_hash`, `files_changed`, `change_summary`, `test_result`, `verification_result`
+  - Linked to `human_action_items` via `action_item_id`
+- `feedback_missed_events`: User-submitted event suggestions from the calendar page
+  - Fields: `url`, `comment`, `ip_hash`, `created_at`
 
 ## Development Patterns
 
@@ -231,6 +245,14 @@ import { config } from '../config.js';
 5. **Classification**: Claude assigns audience and technical level
 6. **Upsert**: Insert or update in database, creating agent_run log entry
 
+### Error Classification
+Scraper errors are classified in `utils/errors.js` into three categories:
+- **Transient** (network timeouts, 5xx, rate limits): Retried once during the scrape loop
+- **Structural** (404, unexpected HTML, parse failures): Escalated to `human_action_items` for outer loop repair
+- **Permanent** (domain gone, consistent 403): Source demoted automatically
+
+The scraper loop in `index.js` catches errors, classifies them, and retries transient failures once before logging.
+
 ### Source Lifecycle
 Sources have two entry paths and a simple lifecycle:
 
@@ -259,7 +281,7 @@ Web search finds URL → PROBATION (every event validated by Claude)
 - `getEventSearchQueries()`: Returns query strings for direct event search (oldest `last_run` first for rotation)
 - `getActiveQueries()`: Returns queries for source discovery using exploration budget strategy
 
-**Key Functions in `index.js`:**
+**Key Functions in `utils/filters.js`** (extracted from index.js):
 - `checkAustinLocation()`: Fast string-based Austin check (no API cost)
 - `isMalformedTitle()`: Detects CSS, HTML, code in titles
 
@@ -401,6 +423,9 @@ The outer loop is a Claude Code scheduled task that runs daily, 2 hours after th
 - Events query window: 30 days from today
 - Full-text search supported via Supabase
 
+### User Feedback Form
+The calendar page includes a "Missing an event?" button (`FeedbackButton.tsx`) that lets users suggest events the agent missed. URL is required, optional comment. Submissions go to `feedback_missed_events` table via `/api/feedback`. Protected by: rate limiting (3/hour per IP), honeypot field for bots, IP hashing (no raw IPs stored).
+
 ### Observatory Page Architecture
 The Observatory (`/observatory`) provides transparency through three layers:
 
@@ -447,7 +472,8 @@ The Observatory (`/observatory`) provides transparency through three layers:
 ### Agent
 - Native Node.js test runner: `npm run test` (from agent/)
 - Pattern: `src/**/*.test.js`
-- Currently no tests present (contribution opportunity)
+- ~90 tests covering: filters (Austin location, malformed titles), dedup (fuzzy matching), config validation, websearch URL matching
+- All tests are pure unit tests with no external dependencies (no API keys or DB needed)
 
 ### Frontend
 - No test framework configured

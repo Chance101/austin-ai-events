@@ -14,6 +14,15 @@ export interface StewardshipEntry {
 
 export const stewardshipLog: StewardshipEntry[] = [
   {
+    id: 'autonomous-outer-loop',
+    date: '2026-03-29',
+    title: 'Autonomous Self-Healing: The Outer Loop',
+    problem: 'The monitor (Opus) could diagnose system issues and write structured action items, but nothing acted on them. Human intervention was required for every code-level fix — broken scrapers, config changes, strategy adjustments. The system was 80% autonomous but the last 20% (code repair) required a human to open Claude Code, review action items, and manually implement fixes.',
+    action: 'Built the complete outer loop infrastructure: (1) Test suite — 90 unit tests so autonomous changes can be validated before pushing. (2) Machine-readable action items — schema upgrade with action_type, affected_files, auto_fixable, repair tracking. (3) Repair audit log — links action items to commits to verification results. (4) Error classification — categorizes scraper errors as transient (retry), structural (code fix), or permanent (demote). (5) Scope gates — four file-modification tiers controlling what the outer loop can change. (6) Monitor staleness + heartbeat detection — catches silent failures of both loops. (7) Repair verification — monitor checks if fixes worked, marks verified/failed. (8) Oscillation protection — freezes items after 3 failed attempts. (9) User feedback form — "Missing an event?" button for ground truth. Deployed as a Claude Code scheduled task running daily on the Max plan.',
+    result: 'The system is now fully autonomous. Daily cycle: agent discovers events → monitor evaluates and writes action items → repair agent reads items, makes code fixes, runs tests, pushes to main → next agent run uses the fixes → monitor verifies repairs worked. No human intervention required for routine maintenance.',
+    category: 'capability',
+  },
+  {
     id: 'web-search-budget-cleanup',
     date: '2026-03-29',
     title: 'Web Search Cleanup: Fix Garbage Events, Reduce Budget',
