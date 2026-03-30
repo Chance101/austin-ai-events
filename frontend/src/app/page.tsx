@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { fetchEventsServer } from "@/lib/supabase-server";
 import EventListClient from "@/components/EventListClient";
+import FeedbackButton from "@/components/FeedbackButton";
 import PageTracker from "@/components/PageTracker";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Event } from "@/types/event";
@@ -117,6 +118,7 @@ export default async function Home() {
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <EventListClient initialEvents={events} />
+        <FeedbackButton />
       </main>
 
       <footer className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 mt-auto">
