@@ -14,6 +14,15 @@ export interface StewardshipEntry {
 
 export const stewardshipLog: StewardshipEntry[] = [
   {
+    id: 'grading-infrastructure-health',
+    date: '2026-03-29',
+    title: 'Regrade on Infrastructure Health, Not Event Count',
+    problem: 'The monitor graded on event count and empty days — metrics outside the agent\'s control. Austin has ~15-25 AI events/month that cluster on weekday evenings. The system scored C with 13 events because 14 of 21 days were empty, even though all scrapers were healthy and the agent was finding every discoverable event. The grade was penalizing the agent for the community\'s scheduling patterns.',
+    action: 'Replaced event-count grading with infrastructure health grading: scraper health rate (% of scrapers returning events), pipeline error rate, contributing source count, and recent discovery activity. Event count and empty days are still gathered and shown to the monitor, but as coverage context — not grading criteria. Added a separate "coverage mission" to the monitor prompt so it still actively hunts for events and fills gaps, but a quiet month doesn\'t tank the grade or trigger unnecessary repairs.',
+    result: 'The grade now reflects what the agent controls. A quiet April with healthy scrapers correctly grades as A instead of C. The monitor still pursues maximum coverage as a standing mission, but distinguishes "the system is broken" (grade) from "the community is quiet" (finding).',
+    category: 'optimization',
+  },
+  {
     id: 'autonomous-outer-loop',
     date: '2026-03-29',
     title: 'Autonomous Self-Healing: The Outer Loop',

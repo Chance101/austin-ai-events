@@ -148,6 +148,19 @@ async function gatherMetrics(pipelineData = {}) {
     if (i < 21 && !eventDays21.has(dayStr)) emptyDays21.push(dayStr);
   }
 
+  // Scraper health: % of active config sources that returned events in their last run
+  const configSourceNames = new Set(['AITX', 'Austin AI Alliance', 'Capital Factory', 'AICamp', 'Austin LangChain', 'AI Automation & Marketing', 'UT Austin AI', 'Austin Forum']);
+  let healthyScrapers = 0;
+  let totalScrapers = 0;
+  for (const [name, perf] of Object.entries(sourcePerformance)) {
+    if (configSourceNames.has(name)) {
+      totalScrapers++;
+      // Healthy = produced events in at least one of their last runs
+      if (perf.totalEvents > 0) healthyScrapers++;
+    }
+  }
+  const scraperHealthRate = totalScrapers > 0 ? Math.round(healthyScrapers / totalScrapers * 100) : 0;
+
   // Source distribution of upcoming events
   const sourceDistribution = {};
   for (const e of upcomingEvents) {
@@ -211,6 +224,9 @@ async function gatherMetrics(pipelineData = {}) {
     lastRun: recentRuns[0] || null,
     totalSources: sources.length,
     activeSources: sources.filter(s => s.trust_tier !== 'demoted').length,
+    scraperHealthRate,
+    healthyScrapers,
+    totalScrapersTracked: totalScrapers,
     activeQueries: queries.length,
     staleQueryCount: staleQueries.length,
     staleQueryNames: staleQueries.slice(0, 5).map(q => q.query_text),
@@ -400,6 +416,9 @@ ${JSON.stringify({
     lastRun: metrics.lastRun,
     totalSources: metrics.totalSources,
     activeSources: metrics.activeSources,
+    scraperHealthRate: metrics.scraperHealthRate,
+    healthyScrapers: metrics.healthyScrapers,
+    totalScrapersTracked: metrics.totalScrapersTracked,
     activeQueries: metrics.activeQueries,
     staleQueryCount: metrics.staleQueryCount,
     staleQueryNames: metrics.staleQueryNames,
@@ -461,16 +480,24 @@ Evaluate the system and respond with ONLY valid JSON (no markdown, no code fence
   ]
 }
 
-## Grading Criteria (based on 21-day window)
-The grade measures CALENDAR HEALTH — how well the calendar serves users right now.
-It does NOT measure how well the last run performed. A run that adds 0 events but the calendar already has 15 events is still an A-grade calendar.
-Use the 21-day metrics to determine the grade. Pipeline issues, cost waste, and source problems belong in your findings — they explain what to fix, not what grade to give.
-Grade on the 21-day metrics (upcomingEventCount_21d, emptyDays_21d), NOT the 30-day metrics. The 30-day data is for strategic planning only.
-- A: 12+ events in 21 days, <8 empty days, 5+ contributing sources, <5% error rate, no broken scrapers
-- B: 8-11 events in 21 days, <12 empty days, 3-4 contributing sources, <10% error rate
-- C: 4-7 events in 21 days, 12-16 empty days, 2-3 contributing sources, some source issues
-- D: <4 events in 21 days, 16+ empty days, <2 contributing sources, multiple broken scrapers
-- F: System producing no value
+## Grading Criteria (infrastructure health)
+The grade measures AGENT EFFECTIVENESS — how well the system is doing its job of discovering and curating events.
+It does NOT measure how many events the Austin AI community happens to have scheduled. Event count and empty days are outside the agent's control — a quiet month with all scrapers healthy is an A, not a C.
+Grade on infrastructure health metrics (scraperHealthRate, error rate, contributing sources), NOT on event counts or empty days. Event counts are useful context for your findings and coverage mission, but they do not determine the grade.
+- A: 80%+ scrapers healthy, <5% error rate, 4+ contributing sources, events added in last 7 days
+- B: 60-79% scrapers healthy, <10% error rate, 3+ contributing sources
+- C: 40-59% scrapers healthy, or >10% error rate, or <3 contributing sources
+- D: <40% scrapers healthy, or multiple consecutive zero-add runs caused by broken scrapers
+- F: System not running or fully broken
+
+## Coverage Mission (separate from grade)
+Your grade reflects infrastructure health, but you also have a standing mission: MAXIMIZE CALENDAR COVERAGE.
+Even when the grade is A, actively look for ways to find more events:
+- If contributing sources drop, create source discovery queries
+- If a week has very few events, investigate whether events exist that we're not finding
+- If a new platform or community appears in Austin, flag it for source discovery
+Coverage observations belong in your findings as "info" severity — they inform your actions but do not affect the grade.
+The key distinction: "our scrapers are broken" (grade issue) vs "the community is quiet this month" (coverage observation, not a grade issue).
 
 ## CRITICAL Guidelines for Findings
 - Use the "status" field: "new" for first-time observations, "recurring" if seen in recent reports, "resolved" if a previously flagged issue is now fixed, "escalated" if recurring and worsening

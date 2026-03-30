@@ -308,13 +308,16 @@ The monitor (`agent/src/monitor.js`) runs automatically as the final phase of ev
 4. **Act** (Layer 3): Receives structured report with letter grade, findings with status tags (new/recurring/resolved/escalated), action review, and auto-actions. Executes up to 5 safe auto-actions per run.
 5. Stores enriched report in `monitor_reports` (includes `action_review` and `decision_summary`).
 
-**Grading (21-day window):**
-The monitor grades on a 21-day window (not 30) because community events are typically posted 2-3 weeks out. The 30-day data is still gathered for strategic planning.
-- A: 12+ events, <8 empty days, 5+ contributing sources, <5% error rate
-- B: 8-11 events, <12 empty days, 3-4 contributing sources
-- C: 4-7 events, 12-16 empty days, some source issues
-- D: <4 events, 16+ empty days, multiple broken sources
-- F: System producing no value
+**Grading (infrastructure health):**
+The grade measures agent effectiveness — how well the system does its job — NOT how many events the community has scheduled. Event count and empty days are outside the agent's control. A quiet month with all scrapers healthy is an A.
+- A: 80%+ scrapers healthy, <5% error rate, 4+ contributing sources, events added in last 7 days
+- B: 60-79% scrapers healthy, <10% error rate, 3+ contributing sources
+- C: 40-59% scrapers healthy, or >10% error rate, or <3 contributing sources
+- D: <40% scrapers healthy, or multiple consecutive zero-add runs caused by broken scrapers
+- F: System not running or fully broken
+
+**Coverage mission (separate from grade):**
+The monitor has a standing mission to maximize calendar coverage regardless of grade. It creates search queries, discovers sources, and investigates gaps — but a quiet community month doesn't lower the grade.
 
 **Why Opus for the monitor:**
 The monitor is the system's brain — it drives the feedback loop. Opus identifies root causes rather than symptoms, generates targeted queries rather than generic ones, and avoids repeating the same findings daily. With multi-run memory, it can track hypotheses across runs ("I created a query 3 runs ago — did it produce events?").
