@@ -23,6 +23,7 @@ async function gatherMetrics(pipelineData = {}) {
     allEventsCountResult,
     openActionItemsResult,
     recentReportsResult,
+    pendingRepairsResult,
   ] = await Promise.all([
     // Last 30 agent runs
     supabase
@@ -67,7 +68,7 @@ async function gatherMetrics(pipelineData = {}) {
     // Open human action items (for resolution tracking)
     supabase
       .from('human_action_items')
-      .select('id, title, description, severity, category, created_at')
+      .select('id, title, description, severity, category, created_at, action_type, auto_fixable, repair_status')
       .eq('is_resolved', false)
       .order('created_at', { ascending: false }),
 
@@ -77,6 +78,13 @@ async function gatherMetrics(pipelineData = {}) {
       .select('overall_grade, summary, findings, auto_actions, action_review, created_at')
       .order('created_at', { ascending: false })
       .limit(5),
+
+    // Repairs awaiting verification (pushed but not yet verified by the monitor)
+    supabase
+      .from('repair_log')
+      .select('id, action_item_id, commit_hash, branch, change_summary, test_result, pushed_at, created_at')
+      .is('verification_result', null)
+      .order('created_at', { ascending: false }),
   ]);
 
   const recentRuns = recentRunsResult.data || [];
@@ -87,6 +95,7 @@ async function gatherMetrics(pipelineData = {}) {
   const totalEvents = allEventsCountResult.count || 0;
   const openActionItems = openActionItemsResult.data || [];
   const recentReports = recentReportsResult.data || [];
+  const pendingRepairs = pendingRepairsResult.data || [];
 
   // Compute derived metrics
   const last7Runs = recentRuns.filter(r =>
@@ -219,7 +228,16 @@ async function gatherMetrics(pipelineData = {}) {
     previousActionOutcomes,
     // Layer 1: Decision summary from this run
     decisionSummary: pipelineData.decisionSummary || null,
-    openActionItems: openActionItems.map(i => ({ id: i.id, title: i.title, severity: i.severity, category: i.category, created_at: i.created_at })),
+    openActionItems: openActionItems.map(i => ({
+      id: i.id, title: i.title, severity: i.severity, category: i.category,
+      created_at: i.created_at, action_type: i.action_type, auto_fixable: i.auto_fixable,
+      repair_status: i.repair_status,
+    })),
+    pendingRepairs: pendingRepairs.map(r => ({
+      id: r.id, action_item_id: r.action_item_id, commit_hash: r.commit_hash,
+      branch: r.branch, change_summary: r.change_summary, test_result: r.test_result,
+      pushed_at: r.pushed_at, created_at: r.created_at,
+    })),
   };
 }
 
@@ -397,7 +415,10 @@ Evaluate the system and respond with ONLY valid JSON (no markdown, no code fence
       "category": "for escalate_to_human: broken_scraper|new_platform|strategy|data_quality",
       "title": "for escalate_to_human: short title for the action item",
       "description": "for escalate_to_human: detailed description",
-      "suggested_fix": "for escalate_to_human: what the human should do"
+      "suggested_fix": "for escalate_to_human: what the human or outer loop should do",
+      "action_type": "for escalate_to_human: code_change|config_change|investigation|strategic — what kind of fix is needed",
+      "affected_files": "for escalate_to_human: array of file paths the fix likely involves, e.g. ['agent/src/sources/meetup.js']",
+      "auto_fixable": "for escalate_to_human: boolean — true if this could be fixed by an automated code repair loop, false if it needs human judgment"
     }
   ]
 }
@@ -609,11 +630,14 @@ async function executeAutoActions(actions, reportId) {
               description: action.description,
               suggested_fix: action.suggested_fix || null,
               monitor_report_id: reportId || null,
+              action_type: action.action_type || 'investigation',
+              affected_files: action.affected_files || null,
+              auto_fixable: action.auto_fixable || false,
             });
           results.push({
             action: 'escalate_to_human',
             detail: action.title,
-            result: error ? `Failed: ${error.message}` : 'Created action item',
+            result: error ? `Failed: ${error.message}` : `Created action item (${action.action_type || 'investigation'}, auto_fixable=${action.auto_fixable || false})`,
           });
           break;
         }
@@ -762,6 +786,12 @@ export async function runMonitor(agentRunId = null, pipelineData = {}) {
   }
   if (metrics.decisionSummary) {
     console.log(`  Decision log: ${metrics.decisionSummary.totalDecisions} decisions from this run`);
+  }
+  if (metrics.pendingRepairs.length > 0) {
+    console.log(`  Pending verification: ${metrics.pendingRepairs.length} repair(s) awaiting monitor verification`);
+    for (const r of metrics.pendingRepairs) {
+      console.log(`    - ${r.commit_hash.substring(0, 7)}: ${r.change_summary.substring(0, 80)} (test: ${r.test_result})`);
+    }
   }
 
   // Step 2: Claude evaluation
