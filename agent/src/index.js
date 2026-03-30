@@ -17,6 +17,8 @@ import { discoverSources, getTrustedSources, getProbationSources, updateSourceSt
 import { analyzeUnprocessedFeedback } from './feedback/analyzeFeedback.js';
 import { runMonitor } from './monitor.js';
 import { RunDecisionLog } from './utils/decisionLog.js';
+import { checkAustinLocation, isMalformedTitle } from './utils/filters.js';
+import { classifyScrapeError, classifySilentFailure } from './utils/errors.js';
 
 /**
  * Create initial run stats object for tracking throughout the pipeline
@@ -57,105 +59,6 @@ function mapSourceType(dbType) {
     'other': 'scrape',
   };
   return typeMap[dbType] || 'scrape';
-}
-
-/**
- * Quick sanity check for Austin location - runs for ALL events regardless of trust tier
- * This is a fast string-based check that doesn't require Claude API calls
- * Returns: { isAustin: true/false/null, reason: string }
- *   true  = definitely Austin (matched Austin indicator)
- *   false = definitely NOT Austin (matched non-Austin city)
- *   null  = uncertain (no match either way, needs Claude verification)
- */
-function checkAustinLocation(event) {
-  const venueOrAddress = [event.venue_name, event.address, event.location, event.title]
-    .filter(Boolean)
-    .join(' ')
-    .toLowerCase();
-
-  // Known non-Austin cities that events might be from
-  const nonAustinCities = [
-    'san antonio', 'houston', 'dallas', 'fort worth', 'san marcos',
-    'new braunfels', 'san francisco', 'los angeles', 'new york',
-    'chicago', 'seattle', 'denver', 'boston', 'atlanta', 'miami',
-    'phoenix', 'portland', 'washington dc', 'philadelphia', 'london',
-    'virtual', 'online only', 'webinar', 'remote', 'zoom only',
-    'killeen', 'waco', 'college station', 'corpus christi', 'el paso',
-    'lubbock', 'amarillo', 'brownsville', 'laredo', 'mcallen',
-  ];
-
-  // Check for explicit non-Austin locations
-  for (const city of nonAustinCities) {
-    if (venueOrAddress.includes(city)) {
-      return { isAustin: false, reason: `Location appears to be in ${city}, not Austin` };
-    }
-  }
-
-  // Austin area indicators
-  const austinIndicators = [
-    'austin', 'atx', 'tx 78', '787', 'travis county', 'williamson county',
-    'hays county', 'round rock', 'cedar park', 'pflugerville',
-    'leander', 'georgetown', 'dripping springs', 'lakeway', 'bee cave',
-    'capital factory', 'domain', 'downtown austin', 'south congress',
-    'east austin', 'soco', '6th street', 'rainey street', 'ut austin',
-    'university of texas', 'acc ', 'st. edwards', 'concordia',
-    'sxsw', 'south lamar', 'mueller', 'zilker', 'shoal creek',
-    'south austin', 'north austin', 'west lake', 'westlake',
-    'brushy creek', 'jollyville', 'manor rd', 'burnet rd',
-    'south first', 'congress ave', 'lamar blvd',
-  ];
-
-  // If venue/address is provided, check for Austin indicators
-  if (venueOrAddress.length > 3) {
-    for (const indicator of austinIndicators) {
-      if (venueOrAddress.includes(indicator)) {
-        return { isAustin: true, reason: 'Location matches Austin area' };
-      }
-    }
-    // Has location data but no definitive match either way - uncertain
-    return { isAustin: null, reason: 'Location provided but no Austin indicators found — needs verification' };
-  }
-
-  // No location data at all - will need Claude validation
-  return { isAustin: null, reason: 'No location data to verify' };
-}
-
-/**
- * Check if a title looks malformed (CSS, HTML, or garbage)
- * Returns true if title appears invalid
- */
-function isMalformedTitle(title) {
-  if (!title) return true;
-
-  const malformedPatterns = [
-    /^\s*\.\w+[-\w]*\s*\{/,           // CSS class definitions: .class-name {
-    /position\s*:\s*relative/i,        // CSS property
-    /display\s*:\s*block/i,            // CSS property
-    /^\s*<\w+/,                        // HTML tags
-    /^\s*\[\w+\]/,                     // Attribute selectors
-    /^\s*#[\w-]+\s*\{/,                // CSS ID selectors
-    /&:hover/,                         // CSS pseudo-selectors
-    /^\s*@media/i,                     // CSS media queries
-    /^\s*@import/i,                    // CSS imports
-    /^\s*function\s*\(/,               // JavaScript
-    /^\s*const\s+\w+/,                 // JavaScript
-    /^\s*var\s+\w+/,                   // JavaScript
-    /[{}]{2,}/,                        // Multiple braces
-  ];
-
-  for (const pattern of malformedPatterns) {
-    if (pattern.test(title)) {
-      return true;
-    }
-  }
-
-  // Title is mostly non-alphanumeric
-  const alphanumeric = title.replace(/[^a-zA-Z0-9]/g, '');
-  if (alphanumeric.length < title.length * 0.3) {
-    return true;
-  }
-
-  return false;
 }
 
 async function discoverEvents() {
@@ -294,45 +197,49 @@ async function discoverEvents() {
 
   console.log('📡 Scraping sources...');
 
+  // Helper: run the right scraper for a source type
+  async function scrapeSource(source) {
+    switch (source.type) {
+      case 'meetup':       return await scrapeMeetup(source);
+      case 'luma':         return await scrapeLuma(source);
+      case 'austinforum':  return await scrapeAustinForum(source);
+      case 'aiaccelerator': return await scrapeAIAccelerator(source);
+      case 'austinai':     return await scrapeAustinAI(source);
+      case 'leadersinai':  return await scrapeLeadersInAI(source);
+      case 'aicamp':       return await scrapeAICamp(source);
+      case 'capitalfactory': return await scrapeCapitalFactory(source);
+      case 'utaustin':     return await scrapeUTAustin(source);
+      case 'scrape':
+      case 'api':          return await scrapeGeneric(source);
+      default:
+        console.log(`    Unknown source type: ${source.type}`);
+        return [];
+    }
+  }
+
   for (const source of allSources) {
     try {
       console.log(`  → ${source.name} (${source.type})`);
 
       let events = [];
-      switch (source.type) {
-        case 'meetup':
-          events = await scrapeMeetup(source);
-          break;
-        case 'luma':
-          events = await scrapeLuma(source);
-          break;
-        case 'austinforum':
-          events = await scrapeAustinForum(source);
-          break;
-        case 'aiaccelerator':
-          events = await scrapeAIAccelerator(source);
-          break;
-        case 'austinai':
-          events = await scrapeAustinAI(source);
-          break;
-        case 'leadersinai':
-          events = await scrapeLeadersInAI(source);
-          break;
-        case 'aicamp':
-          events = await scrapeAICamp(source);
-          break;
-        case 'capitalfactory':
-          events = await scrapeCapitalFactory(source);
-          break;
-        case 'utaustin':
-          events = await scrapeUTAustin(source);
-          break;
-        case 'scrape':
-        case 'api':
-          events = await scrapeGeneric(source);
-          break;
-        default:
-          console.log(`    Unknown source type: ${source.type}`);
+      try {
+        events = await scrapeSource(source);
+      } catch (firstError) {
+        const classified = classifyScrapeError(firstError, { source: source.name });
+
+        if (classified.retryable) {
+          console.warn(`    ⚠️  ${classified.type} error, retrying in 2s: ${classified.message}`);
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          try {
+            events = await scrapeSource(source);
+          } catch (retryError) {
+            // Retry also failed — reclassify and throw to outer catch
+            throw retryError;
+          }
+        } else {
+          // Non-retryable (structural/permanent) — throw to outer catch
+          throw firstError;
+        }
       }
 
       console.log(`    Found ${events.length} events`);
@@ -343,6 +250,24 @@ async function discoverEvents() {
 
       if (events.length === 0) {
         console.warn(`    ⚠️  ${source.name} returned 0 events — may be silently failing`);
+
+        // Classify the silent failure using consecutive empty scrape count from DB
+        let sourceData = null;
+        try {
+          const supabaseClient = getSupabase();
+          const { data } = await supabaseClient
+            .from('sources')
+            .select('consecutive_empty_scrapes, name')
+            .eq('url', source.url)
+            .single();
+          sourceData = data;
+        } catch { /* ignore — classification will use defaults */ }
+
+        const silentClassification = classifySilentFailure(
+          { consecutive_empty_scrapes: sourceData?.consecutive_empty_scrapes || 0, name: source.name },
+          0
+        );
+        console.log(`    📊 Silent failure classification: ${silentClassification.type} — ${silentClassification.message}`);
       }
 
       // Attach source metadata to each event for conditional validation
@@ -360,9 +285,15 @@ async function discoverEvents() {
       }
 
     } catch (error) {
-      console.error(`    Error: ${error.message}`);
+      const classified = classifyScrapeError(error, { source: source.name });
+      console.error(`    Error [${classified.type}]: ${error.message}`);
       runStats.errors++;
-      runStats.errorMessages.push(`Scrape ${source.name}: ${error.message}`);
+      runStats.errorMessages.push({
+        source: source.name,
+        type: classified.type,
+        message: classified.message,
+        retryable: classified.retryable,
+      });
     }
   }
 
