@@ -327,11 +327,11 @@ function PastReportCard({ report, isExpanded, onToggle }: {
 
 export function GradingKey() {
   const grades = [
-    { grade: 'A', events: '12+', emptyDays: '<8', sources: '5+ contributing', health: '<5% error rate, no broken scrapers' },
-    { grade: 'B', events: '8-11', emptyDays: '8-12', sources: '3-4 contributing', health: '<10% error rate, sources mostly healthy' },
-    { grade: 'C', events: '4-7', emptyDays: '12-16', sources: '2-3 contributing', health: 'Some source issues or elevated errors' },
-    { grade: 'D', events: '<4', emptyDays: '16+', sources: '<2 contributing', health: 'Multiple broken scrapers or high error rate' },
-    { grade: 'F', events: '0', emptyDays: '—', sources: '—', health: 'System producing no value' },
+    { grade: 'A', scraperHealth: '80%+', sources: '4+ contributing', errorRate: '<5%', activity: 'Events added in last 7d' },
+    { grade: 'B', scraperHealth: '60-79%', sources: '3+ contributing', errorRate: '<10%', activity: 'Active discovery' },
+    { grade: 'C', scraperHealth: '40-59%', sources: '2-3 contributing', errorRate: '>10%', activity: 'Some source issues' },
+    { grade: 'D', scraperHealth: '<40%', sources: '<2 contributing', errorRate: 'High', activity: 'Multiple broken scrapers' },
+    { grade: 'F', scraperHealth: '—', sources: '—', errorRate: '—', activity: 'System not running' },
   ];
 
   return (
@@ -341,14 +341,14 @@ export function GradingKey() {
           <thead>
             <tr className="text-left text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
               <th className="pb-2 pr-3 font-medium">Grade</th>
-              <th className="pb-2 pr-3 font-medium">Events (21d)</th>
-              <th className="pb-2 pr-3 font-medium">Empty Days</th>
+              <th className="pb-2 pr-3 font-medium">Scraper Health</th>
               <th className="pb-2 pr-3 font-medium">Sources</th>
-              <th className="pb-2 font-medium">System Health</th>
+              <th className="pb-2 pr-3 font-medium">Error Rate</th>
+              <th className="pb-2 font-medium">Activity</th>
             </tr>
           </thead>
           <tbody>
-            {grades.map(({ grade, events, emptyDays, sources, health }) => {
+            {grades.map(({ grade, scraperHealth, sources, errorRate, activity }) => {
               const colors = gradeColors[grade] || gradeColors.C;
               return (
                 <tr key={grade} className="border-b border-gray-100 dark:border-gray-700/50 last:border-0">
@@ -357,10 +357,10 @@ export function GradingKey() {
                       {grade}
                     </span>
                   </td>
-                  <td className="py-1.5 pr-3 text-gray-700 dark:text-gray-300">{events}</td>
-                  <td className="py-1.5 pr-3 text-gray-700 dark:text-gray-300">{emptyDays}</td>
+                  <td className="py-1.5 pr-3 text-gray-700 dark:text-gray-300">{scraperHealth}</td>
                   <td className="py-1.5 pr-3 text-gray-700 dark:text-gray-300">{sources}</td>
-                  <td className="py-1.5 text-gray-700 dark:text-gray-300">{health}</td>
+                  <td className="py-1.5 pr-3 text-gray-700 dark:text-gray-300">{errorRate}</td>
+                  <td className="py-1.5 text-gray-700 dark:text-gray-300">{activity}</td>
                 </tr>
               );
             })}
@@ -368,7 +368,7 @@ export function GradingKey() {
         </table>
       </div>
       <p className="mt-3 text-xs text-gray-400 dark:text-gray-500 italic">
-        Grades are based on a 21-day window. Most community events are posted 2-3 weeks before they happen, so days beyond that naturally have gaps that fill in over time.
+        Updated 2026-03-29: Grades now measure infrastructure health (what the agent controls), not event count or empty days (which reflect community activity). The agent still actively maximizes calendar coverage as a separate mission.
       </p>
     </div>
   );
