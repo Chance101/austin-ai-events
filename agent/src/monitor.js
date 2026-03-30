@@ -411,7 +411,11 @@ ${decisionSummarySection}${recentReportsSection}${actionOutcomesSection}${
       ? `\n## Open Human Action Items (unresolved escalations)\n${JSON.stringify(metrics.openActionItems, null, 2)}\nThese are issues you previously escalated. If the underlying issue has been fixed (based on this run's data), use resolve_action_item to close them.\n`
       : ''
   }
-${systemWarnings}## Your Task
+${
+    metrics.pendingRepairs && metrics.pendingRepairs.length > 0
+      ? `\n## Pending Repairs (awaiting your verification)\n${JSON.stringify(metrics.pendingRepairs, null, 2)}\nThese are code fixes pushed by the outer loop. For each, check if the symptom it targeted has resolved based on this run's data. Use verify_repair to mark each as 'verified' (fix worked) or 'failed' (symptom persists). If a repair failed, the outer loop will revert the commit on its next run.\n`
+      : ''
+  }${systemWarnings}## Your Task
 Evaluate the system and respond with ONLY valid JSON (no markdown, no code fences):
 
 {
@@ -435,7 +439,7 @@ Evaluate the system and respond with ONLY valid JSON (no markdown, no code fence
   ],
   "auto_actions": [
     {
-      "type": "deactivate_query|create_query|create_source_query|boost_query|flag_source|add_source_context|escalate_to_human|resolve_action_item|skip_source",
+      "type": "deactivate_query|create_query|create_source_query|boost_query|flag_source|add_source_context|escalate_to_human|resolve_action_item|skip_source|verify_repair",
       "detail": "Specific action description",
       "query_text": "for query actions, the exact search string",
       "source_url": "for source actions, the URL",
@@ -449,7 +453,10 @@ Evaluate the system and respond with ONLY valid JSON (no markdown, no code fence
       "suggested_fix": "for escalate_to_human: what the human or outer loop should do",
       "action_type": "for escalate_to_human: code_change|config_change|investigation|strategic — what kind of fix is needed",
       "affected_files": "for escalate_to_human: array of file paths the fix likely involves, e.g. ['agent/src/sources/meetup.js']",
-      "auto_fixable": "for escalate_to_human: boolean — true if this could be fixed by an automated code repair loop, false if it needs human judgment"
+      "auto_fixable": "for escalate_to_human: boolean — true if this could be fixed by an automated code repair loop, false if it needs human judgment",
+      "repair_id": "for verify_repair: UUID from Pending Repairs list",
+      "verification_result": "for verify_repair: 'verified' (fix worked) or 'failed' (symptom persists)",
+      "verification_notes": "for verify_repair: brief explanation of why you marked it verified or failed"
     }
   ]
 }
@@ -511,6 +518,11 @@ You are the sole query strategist. Every query you create must be purposeful:
 - **resolve_action_item**: Mark a previously escalated action item as resolved.
   Use when the underlying issue has been fixed (you can see this in the current run's data).
   Provide the action_item_id from the "Open Human Action Items" list above.
+
+- **verify_repair**: Verify whether an outer loop repair worked or failed.
+  Check the "Pending Repairs" section — for each repair, examine this run's data to see if the targeted symptom resolved.
+  Provide repair_id, verification_result ('verified' or 'failed'), and verification_notes.
+  If 'failed', the outer loop will revert the commit on its next run.
 
 - Maximum 5 auto-actions per evaluation
 - Before creating a query, check if a similar one exists in the active queries list
@@ -728,6 +740,60 @@ async function executeAutoActions(actions, reportId) {
           break;
         }
 
+        case 'verify_repair': {
+          if (!action.repair_id || !action.verification_result) {
+            results.push({
+              action: 'verify_repair',
+              detail: action.repair_id || 'unknown',
+              result: 'Skipped (missing repair_id or verification_result)',
+            });
+            break;
+          }
+          // Update repair_log with verification result
+          const { error: repairError } = await supabase
+            .from('repair_log')
+            .update({
+              verified_at: new Date().toISOString(),
+              verification_result: action.verification_result,
+            })
+            .eq('id', action.repair_id);
+          if (repairError) {
+            results.push({
+              action: 'verify_repair',
+              detail: action.repair_id,
+              result: `Failed: ${repairError.message}`,
+            });
+            break;
+          }
+          // Get the repair to find the linked action item
+          const { data: repair } = await supabase
+            .from('repair_log')
+            .select('action_item_id, commit_hash')
+            .eq('id', action.repair_id)
+            .single();
+          if (repair?.action_item_id) {
+            if (action.verification_result === 'verified') {
+              // Mark action item as resolved
+              await supabase
+                .from('human_action_items')
+                .update({ repair_status: 'verified', is_resolved: true })
+                .eq('id', repair.action_item_id);
+            } else {
+              // Mark action item repair as failed — outer loop will revert
+              await supabase
+                .from('human_action_items')
+                .update({ repair_status: 'failed' })
+                .eq('id', repair.action_item_id);
+            }
+          }
+          results.push({
+            action: 'verify_repair',
+            detail: `${repair?.commit_hash?.substring(0, 7) || action.repair_id}: ${action.verification_result}`,
+            result: `${action.verification_result} — ${action.verification_notes || 'no notes'}`,
+          });
+          break;
+        }
+
         case 'resolve_action_item': {
           if (!action.action_item_id) {
             results.push({
@@ -911,6 +977,27 @@ export async function runMonitor(agentRunId = null, pipelineData = {}) {
   }
 
   console.log('\n  Report saved.');
+
+  // Step 6: Oscillation detection — freeze action items with 3+ failed repair attempts
+  const { data: frozenCandidates } = await supabase
+    .from('human_action_items')
+    .select('id, title, attempt_count, repair_status')
+    .eq('is_resolved', false)
+    .gte('attempt_count', 3)
+    .eq('repair_status', 'failed');
+
+  if (frozenCandidates && frozenCandidates.length > 0) {
+    console.log(`\n  Oscillation check: ${frozenCandidates.length} item(s) with 3+ failed repairs`);
+    for (const item of frozenCandidates) {
+      // Mark as rolled_back to prevent further attempts
+      await supabase
+        .from('human_action_items')
+        .update({ repair_status: 'rolled_back' })
+        .eq('id', item.id);
+      console.log(`    Frozen: "${item.title}" (${item.attempt_count} attempts) — needs human intervention`);
+    }
+  }
+
   console.log('\n' + '='.repeat(50));
 
   return { evaluation, metrics, autoActionResults };
