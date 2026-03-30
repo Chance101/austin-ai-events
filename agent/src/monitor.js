@@ -24,6 +24,7 @@ async function gatherMetrics(pipelineData = {}) {
     openActionItemsResult,
     recentReportsResult,
     pendingRepairsResult,
+    lastRepairLogResult,
   ] = await Promise.all([
     // Last 30 agent runs
     supabase
@@ -85,6 +86,13 @@ async function gatherMetrics(pipelineData = {}) {
       .select('id, action_item_id, commit_hash, branch, change_summary, test_result, pushed_at, created_at')
       .is('verification_result', null)
       .order('created_at', { ascending: false }),
+
+    // Most recent repair_log entry (heartbeat check for outer loop)
+    supabase
+      .from('repair_log')
+      .select('created_at')
+      .order('created_at', { ascending: false })
+      .limit(1),
   ]);
 
   const recentRuns = recentRunsResult.data || [];
@@ -96,6 +104,7 @@ async function gatherMetrics(pipelineData = {}) {
   const openActionItems = openActionItemsResult.data || [];
   const recentReports = recentReportsResult.data || [];
   const pendingRepairs = pendingRepairsResult.data || [];
+  const lastRepairLogEntry = (lastRepairLogResult.data || [])[0] || null;
 
   // Compute derived metrics
   const last7Runs = recentRuns.filter(r =>
@@ -174,6 +183,17 @@ async function gatherMetrics(pipelineData = {}) {
   // Look up query performance for queries the monitor created in recent reports
   const previousActionOutcomes = await getActionOutcomes(recentReports, queries);
 
+  // --- Outer loop heartbeat detection ---
+  let outerLoopWarning = null;
+  const outerLoopLastRun = lastRepairLogEntry ? lastRepairLogEntry.created_at : null;
+  if (lastRepairLogEntry) {
+    const hoursSinceLastRepair = (now - new Date(lastRepairLogEntry.created_at)) / (1000 * 60 * 60);
+    const autoFixableItems = openActionItems.filter(i => i.auto_fixable === true);
+    if (hoursSinceLastRepair > 48 && autoFixableItems.length > 0) {
+      outerLoopWarning = `WARNING: The outer loop has not run in ${Math.round(hoursSinceLastRepair)} hours but there are ${autoFixableItems.length} auto-fixable action items pending. The scheduled Claude Code task may be down.`;
+    }
+  }
+
   return {
     timestamp: now.toISOString(),
     totalEvents,
@@ -238,6 +258,8 @@ async function gatherMetrics(pipelineData = {}) {
       branch: r.branch, change_summary: r.change_summary, test_result: r.test_result,
       pushed_at: r.pushed_at, created_at: r.created_at,
     })),
+    outerLoopWarning,
+    outerLoopLastRun,
   };
 }
 
@@ -333,6 +355,15 @@ Did the queries you created recently produce events? Were they recycled? Use thi
 `;
   }
 
+  // Build system warnings section
+  let systemWarnings = '';
+  if (metrics.stalenessWarning) {
+    systemWarnings += `\n## SYSTEM WARNING: Monitor Staleness\n${metrics.stalenessWarning}\n`;
+  }
+  if (metrics.outerLoopWarning) {
+    systemWarnings += `\n## SYSTEM WARNING: Outer Loop Down\n${metrics.outerLoopWarning}\n`;
+  }
+
   const prompt = `You are the strategic brain of an automated AI event calendar system (austinai.events). You run on Opus because this is the most important decision point in the system — your analysis drives what the system does next.
 
 ## System Architecture
@@ -380,7 +411,7 @@ ${decisionSummarySection}${recentReportsSection}${actionOutcomesSection}${
       ? `\n## Open Human Action Items (unresolved escalations)\n${JSON.stringify(metrics.openActionItems, null, 2)}\nThese are issues you previously escalated. If the underlying issue has been fixed (based on this run's data), use resolve_action_item to close them.\n`
       : ''
   }
-## Your Task
+${systemWarnings}## Your Task
 Evaluate the system and respond with ONLY valid JSON (no markdown, no code fences):
 
 {
@@ -792,6 +823,40 @@ export async function runMonitor(agentRunId = null, pipelineData = {}) {
     for (const r of metrics.pendingRepairs) {
       console.log(`    - ${r.commit_hash.substring(0, 7)}: ${r.change_summary.substring(0, 80)} (test: ${r.test_result})`);
     }
+  }
+
+  // Step 1.5: Staleness detection
+  if (metrics.recentReports.length >= 5) {
+    const latestGrade = metrics.recentReports[0].grade;
+    let consecutiveSameGrade = 0;
+    for (const report of metrics.recentReports) {
+      if (report.grade === latestGrade) {
+        consecutiveSameGrade++;
+      } else {
+        break;
+      }
+    }
+    if (consecutiveSameGrade >= 5) {
+      // Check if summaries are substantially similar (first 100 chars match)
+      const latestPrefix = (metrics.recentReports[0].summary || '').substring(0, 100);
+      let similarSummaries = 0;
+      for (const report of metrics.recentReports) {
+        if ((report.summary || '').substring(0, 100) === latestPrefix) {
+          similarSummaries++;
+        } else {
+          break;
+        }
+      }
+      if (similarSummaries >= 5) {
+        metrics.stalenessWarning = `WARNING: Grade has been ${latestGrade} for ${consecutiveSameGrade} consecutive reports with similar findings. The system may be stuck. Consider whether the grading criteria, monitor prompt, or action pipeline needs adjustment.`;
+        console.log(`  ⚠️  Staleness detected: grade ${latestGrade} unchanged for ${consecutiveSameGrade} reports`);
+      }
+    }
+  }
+
+  // Step 1.6: Outer loop heartbeat logging
+  if (metrics.outerLoopWarning) {
+    console.log(`  ⚠️  Outer loop: ${metrics.outerLoopWarning}`);
   }
 
   // Step 2: Claude evaluation
