@@ -332,6 +332,52 @@ Queries are deactivated when: (times_run >= 2 AND sources_found = 0 AND priority
 
 **Run manually:** `cd agent && npm run monitor`
 
+## Autonomous Outer Loop (Scheduled Claude Code Agent)
+
+### What It Is
+The outer loop is a Claude Code scheduled task that runs daily, 2 hours after the agent. It reads unresolved action items from `human_action_items`, makes code fixes, runs tests, commits, and pushes. One fix per run.
+
+### Scope Gates
+
+**Safe (fix and push to main):**
+- `agent/src/config.js` — source list, schedules, budgets
+- `agent/src/discovery/sourceDiscovery.js` — query limits, recycling thresholds
+- Source `validation_context` in the DB (via Supabase client)
+- Search query management in the DB
+
+**Moderate (fix, test, push to main, flag for verification):**
+- `agent/src/sources/*.js` — individual scraper files
+- `agent/src/utils/errors.js` — error classification
+
+**Restricted (propose only, do not push):**
+- `agent/src/index.js` — core pipeline orchestration
+- `agent/src/utils/*.js` (except errors.js) — shared utilities
+- `agent/src/monitor.js` — system evaluation logic
+- `frontend/src/**` — frontend components and pages
+
+**Never (cannot modify):**
+- `.env`, `.env.*` — secrets
+- `.github/workflows/*` — CI/CD configuration
+- `package.json`, `package-lock.json` — dependencies
+- `CLAUDE.md` — system documentation
+- `supabase/migrations/*` — schema (requires human review)
+
+### Workflow
+1. Query `human_action_items` for highest-severity unresolved item where `auto_fixable = true` and `repair_status = 'pending'`
+2. Check staleness: query current metrics to see if the issue still exists. If resolved, mark as stale and stop.
+3. Check scope: are the `affected_files` within Safe or Moderate tiers? If Restricted or Never, skip.
+4. Make the fix, respecting the tier rules above
+5. Run `cd agent && npm test` — if tests fail, do not push, log failure to `repair_log`
+6. If tests pass: commit with descriptive message, push to main
+7. Log to `repair_log`: action_item_id, commit_hash, files_changed, change_summary, test_result
+8. Update action item: `repair_status = 'attempted'`, `attempt_count += 1`, `repair_commit = <hash>`
+9. One fix per run. Stop after handling one item.
+
+### Safety Rails
+- **Oscillation protection:** If `attempt_count >= 3` and `repair_status = 'failed'`, freeze the item and create a GitHub issue
+- **Rollback:** If the monitor marks a repair as `verification_result = 'failed'`, the outer loop should `git revert` the commit on its next run
+- **Heartbeat:** The outer loop writes a heartbeat record to `repair_log` on every run (even with nothing to fix) so the monitor can detect if the outer loop is down
+
 ## Critical Implementation Details
 
 ### Timezone Handling
