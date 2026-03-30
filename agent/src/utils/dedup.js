@@ -24,6 +24,50 @@ function normalizeVenue(venue) {
 }
 
 /**
+ * Extract venue fingerprints for loose cross-source matching.
+ * Returns an array of alphanumeric substrings (6+ chars) that can identify a venue.
+ * E.g., "Antler VC, 800 Brazos St, Austin" → ['antlervc', '800brazosst', 'antlervc800brazosstaustintx']
+ */
+export function getVenueFingerprints(venueName, address) {
+  const fingerprints = [];
+  const parts = [venueName, address].filter(Boolean);
+
+  for (const part of parts) {
+    const normalized = part.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (normalized.length >= 6) {
+      fingerprints.push(normalized);
+    }
+  }
+
+  // Also add combined fingerprint for partial matches
+  const combined = parts.join(' ').toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (combined.length >= 6) {
+    fingerprints.push(combined);
+  }
+
+  return fingerprints;
+}
+
+/**
+ * Check if two events might be at the same venue based on fingerprint overlap.
+ * Returns true if any fingerprint from one venue is a substring of any fingerprint from the other.
+ */
+export function venuesOverlap(v1Name, v1Addr, v2Name, v2Addr) {
+  const fp1 = getVenueFingerprints(v1Name, v1Addr);
+  const fp2 = getVenueFingerprints(v2Name, v2Addr);
+
+  if (fp1.length === 0 || fp2.length === 0) return false;
+
+  for (const a of fp1) {
+    for (const b of fp2) {
+      if (a.includes(b) || b.includes(a)) return true;
+    }
+  }
+
+  return false;
+}
+
+/**
  * Find potential duplicates using fuzzy matching + AI reasoning
  * @param {Object} newEvent - The new event to check
  * @param {Array} existingEvents - Array of existing events to compare against
@@ -89,6 +133,71 @@ export async function findDuplicates(newEvent, existingEvents, runStats = null) 
         }
       } catch (error) {
         console.error('Error checking same-source duplicate:', error);
+      }
+    }
+  }
+
+  // Cross-source time+venue check: catches same event with completely different titles
+  // across different sources (e.g., "Texas AI House" vs "March Roundtable Breakfast")
+  if (newEvent.source && newDate) {
+    const crossSourceCandidates = existingEvents.filter(existing => {
+      if (!existing.start_time) return false;
+      // Must be from a different source
+      if (existing.source === newEvent.source) return false;
+      const existingDate = parseISO(existing.start_time);
+      const hoursDiff = Math.abs(differenceInHours(newDate, existingDate));
+      return hoursDiff <= 3;
+    });
+
+    // Check candidates with venue/organizer overlap first
+    const venueMatches = crossSourceCandidates.filter(existing => {
+      return venuesOverlap(
+        newEvent.venue_name || newEvent.location, newEvent.address,
+        existing.venue_name || existing.location, existing.address
+      );
+    });
+
+    for (const candidate of venueMatches.slice(0, 3)) {
+      try {
+        const result = await checkDuplicate(newEvent, candidate, runStats);
+        if (runStats) runStats.claudeApiCalls++;
+        if (result.isDuplicate && result.confidence > 0.7) {
+          return {
+            existingEvent: candidate,
+            confidence: result.confidence,
+            reason: `Cross-source time+venue match: ${result.reason}`,
+          };
+        }
+      } catch (error) {
+        console.error('Error checking cross-source duplicate:', error);
+      }
+    }
+
+    // If no venue data on either side but times are very close (within 1 hour),
+    // still check — one source may lack venue info
+    if (venueMatches.length === 0) {
+      const closeTimeCandidates = crossSourceCandidates.filter(existing => {
+        const existingDate = parseISO(existing.start_time);
+        const hoursDiff = Math.abs(differenceInHours(newDate, existingDate));
+        const newHasVenue = newEvent.venue_name || newEvent.address || newEvent.location;
+        const existingHasVenue = existing.venue_name || existing.address || existing.location;
+        return hoursDiff <= 1 && (!newHasVenue || !existingHasVenue);
+      });
+
+      for (const candidate of closeTimeCandidates.slice(0, 3)) {
+        try {
+          const result = await checkDuplicate(newEvent, candidate, runStats);
+          if (runStats) runStats.claudeApiCalls++;
+          if (result.isDuplicate && result.confidence > 0.7) {
+            return {
+              existingEvent: candidate,
+              confidence: result.confidence,
+              reason: `Cross-source close-time match: ${result.reason}`,
+            };
+          }
+        } catch (error) {
+          console.error('Error checking cross-source duplicate:', error);
+        }
       }
     }
   }

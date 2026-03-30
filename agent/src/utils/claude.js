@@ -269,18 +269,24 @@ Guidelines for summary:
 export async function checkDuplicate(event1, event2, runStats = null) {
   const anthropic = getClient();
 
-  const prompt = `Determine if these two events are the same event (duplicates).
+  const prompt = `Determine if these two events are the same real-world event (duplicates).
 
 Event 1:
 - Title: ${event1.title}
 - Date: ${event1.start_time}
 - Location: ${event1.venue_name || event1.location || 'Unknown'}
+- Address: ${event1.address || 'Unknown'}
+- Organizer: ${event1.organizer || 'Unknown'}
+- Source: ${event1.source || 'Unknown'}
 - URL: ${event1.url}
 
 Event 2:
 - Title: ${event2.title}
 - Date: ${event2.start_time}
 - Location: ${event2.venue_name || event2.location || 'Unknown'}
+- Address: ${event2.address || 'Unknown'}
+- Organizer: ${event2.organizer || 'Unknown'}
+- Source: ${event2.source || 'Unknown'}
 - URL: ${event2.url}
 
 Respond with JSON:
@@ -290,7 +296,7 @@ Respond with JSON:
   "reason": string
 }
 
-Consider: Same event might have slightly different titles or be listed on multiple platforms.`;
+The same real-world event is often listed on multiple platforms with completely different titles. Focus on date proximity, venue match, and organizer match. Title similarity is helpful but NOT required for a duplicate determination.`;
 
   const message = await anthropic.messages.create({
     model: config.models.fast,

@@ -237,8 +237,10 @@ import { config } from '../config.js';
    - `checkAustinLocation()`: Fast string-based Austin location check for ALL events
 3. **Deduplication** (before validation to save API costs):
    - URL hash lookup against existing events (includes past 30 days to prevent phantom re-adds)
-   - Fuzzy match against existing events (Fuse.js with default threshold)
-   - Claude semantic analysis for edge cases
+   - Exact title + time/venue match (no Claude cost)
+   - Same source + same day → Claude semantic check
+   - **Cross-source time+venue overlap** → Claude semantic check (catches same event with different titles across sources — e.g., "Texas AI House" on web-search vs "March Roundtable Breakfast" on austin-ai). Events from different sources within 3 hours at the same venue are sent to Claude regardless of title similarity. Venue matching uses fingerprint overlap (substring matching on normalized venue/address text).
+   - Fuzzy title match (Fuse.js threshold 0.4, within 24 hours) → Claude semantic check
 4. **Claude Validation**: Validates structure and event quality (confidence score >= 0.6)
    - **Config sources skip validation only if Austin location is confirmed**
    - All DB-discovered sources (probation) always validated

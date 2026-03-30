@@ -14,6 +14,15 @@ export interface StewardshipEntry {
 
 export const stewardshipLog: StewardshipEntry[] = [
   {
+    id: 'cross-source-dedup',
+    date: '2026-03-30',
+    title: 'Cross-Source Duplicate Detection',
+    problem: 'The same real-world event listed on multiple platforms (e.g., AITX on Luma vs Austin AI Alliance website) appeared as two separate calendar entries because the dedup system relied entirely on title similarity. When sources gave the same event completely different names ("Texas AI House" vs "March Roundtable Breakfast"), no dedup stage fired. Secondary sources often had worse data — wrong times, incorrect pricing, and redirected to the primary source for registration.',
+    action: 'Added a title-independent dedup stage that matches events by date+time+venue overlap across different sources. Events from different sources within 3 hours at the same venue are sent to Claude for confirmation, regardless of title similarity. Also enriched the duplicate-check prompt with address, organizer, and source fields, and added explicit guidance that title similarity is not required for duplicate determination.',
+    result: 'Cross-source duplicates are now caught at ingestion time. Primary source versions (with correct details and direct registration) are preserved while inferior re-listings are rejected. Cleaned up 2 existing duplicates from the calendar.',
+    category: 'optimization',
+  },
+  {
     id: 'grading-infrastructure-health',
     date: '2026-03-29',
     title: 'Regrade on Infrastructure Health, Not Event Count',

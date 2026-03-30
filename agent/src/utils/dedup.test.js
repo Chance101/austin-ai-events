@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { getEventHash } from './dedup.js';
+import { getEventHash, getVenueFingerprints, venuesOverlap } from './dedup.js';
 
 // Note: findDuplicates imports checkDuplicate from claude.js which requires
 // the Anthropic API. We test getEventHash directly (no external deps) and
@@ -68,6 +68,61 @@ describe('getEventHash', () => {
     const event1 = { url: 'https://meetup.com/event/123' };
     const event2 = { url: 'https://eventbrite.com/event/123' };
     assert.notStrictEqual(getEventHash(event1), getEventHash(event2));
+  });
+});
+
+describe('getVenueFingerprints', () => {
+  it('extracts fingerprints from venue name', () => {
+    const fps = getVenueFingerprints('Antler VC', null);
+    assert.ok(fps.length > 0);
+    assert.ok(fps.some(fp => fp.includes('antlervc')));
+  });
+
+  it('extracts fingerprints from address', () => {
+    const fps = getVenueFingerprints(null, '800 Brazos St, Austin, TX');
+    assert.ok(fps.length > 0);
+    assert.ok(fps.some(fp => fp.includes('800brazos')));
+  });
+
+  it('combines venue name and address', () => {
+    const fps = getVenueFingerprints('Antler VC', '800 Brazos St');
+    assert.ok(fps.some(fp => fp.includes('antlervc') && fp.includes('800brazos')));
+  });
+
+  it('returns empty array for null inputs', () => {
+    const fps = getVenueFingerprints(null, null);
+    assert.strictEqual(fps.length, 0);
+  });
+
+  it('filters out short strings (< 6 chars)', () => {
+    const fps = getVenueFingerprints('Hi', null);
+    assert.strictEqual(fps.length, 0);
+  });
+});
+
+describe('venuesOverlap', () => {
+  it('detects overlap when venue name appears in other address', () => {
+    assert.ok(venuesOverlap('Antler VC', null, null, 'Antler VC, 800 Brazos St, Austin'));
+  });
+
+  it('detects overlap for same venue different formatting', () => {
+    assert.ok(venuesOverlap('Capital Factory', null, 'Capital Factory Main Space', null));
+  });
+
+  it('detects overlap via shared address', () => {
+    assert.ok(venuesOverlap(null, '9225 Bee Cave Road', null, '9225 Bee Cave Road Building A, Suite 350'));
+  });
+
+  it('returns false for different venues', () => {
+    assert.ok(!venuesOverlap('Capital Factory', '701 Brazos St', 'Antler VC', '800 Brazos St'));
+  });
+
+  it('returns false when one side has no venue data', () => {
+    assert.ok(!venuesOverlap('Capital Factory', '701 Brazos St', null, null));
+  });
+
+  it('returns false for both sides null', () => {
+    assert.ok(!venuesOverlap(null, null, null, null));
   });
 });
 
@@ -198,6 +253,63 @@ describe('findDuplicates (non-Claude paths)', async () => {
 
     const result = await findDuplicates(newEvent, existingEvents);
     assert.ok(result !== null, 'Should detect normalized title match as duplicate');
+  });
+
+  it('does NOT flag cross-source events at same venue but 5+ hours apart', async (t) => {
+    if (!findDuplicates) return t.skip('dedup.js import failed');
+
+    const newEvent = {
+      title: 'Morning Workshop on AI Ethics',
+      url: 'https://example.com/morning',
+      start_time: '2026-04-15T14:00:00Z', // 9 AM CDT
+      venue_name: 'Capital Factory',
+      source: 'web-search',
+    };
+
+    const existingEvents = [
+      {
+        title: 'Evening AI Networking Mixer',
+        url: 'https://example.com/evening',
+        start_time: '2026-04-15T23:00:00Z', // 6 PM CDT — 9 hours later
+        venue_name: 'Capital Factory',
+        source: 'meetup',
+      },
+    ];
+
+    // 9 hours apart — outside the 3-hour cross-source window.
+    // Titles are different so no exact match. Different sources so no same-source check.
+    // Fuse.js won't match these titles. Should return null.
+    const result = await findDuplicates(newEvent, existingEvents);
+    assert.strictEqual(result, null);
+  });
+
+  it('does NOT flag cross-source events at different venues same time', async (t) => {
+    if (!findDuplicates) return t.skip('dedup.js import failed');
+
+    const newEvent = {
+      title: 'AI Startup Demo Night',
+      url: 'https://example.com/demo',
+      start_time: '2026-04-15T23:30:00Z',
+      venue_name: 'Capital Factory',
+      address: '701 Brazos St',
+      source: 'web-search',
+    };
+
+    const existingEvents = [
+      {
+        title: 'Machine Learning Study Group',
+        url: 'https://example.com/study',
+        start_time: '2026-04-15T23:30:00Z', // exact same time
+        venue_name: 'UT Austin',
+        address: '2317 Speedway',
+        source: 'meetup',
+      },
+    ];
+
+    // Same time but different venues — should not flag.
+    // Titles are different so no exact/fuzzy match either.
+    const result = await findDuplicates(newEvent, existingEvents);
+    assert.strictEqual(result, null);
   });
 
   it('does NOT flag events with same title but dates far apart', async (t) => {
