@@ -55,10 +55,16 @@ async function checkIfEventWasFound(url, title) {
   // Check by URL similarity
   const normalizedUrl = normalizeUrl(url);
 
+  // Build filter — title may be null for URL-only feedback submissions
+  const titleFilter = title ? `title.ilike.%${title.substring(0, 30)}%` : null;
+  const filter = titleFilter
+    ? `url.ilike.%${normalizedUrl}%,${titleFilter}`
+    : `url.ilike.%${normalizedUrl}%`;
+
   const { data: events } = await supabase
     .from('events')
     .select('*')
-    .or(`url.ilike.%${normalizedUrl}%,title.ilike.%${title.substring(0, 30)}%`);
+    .or(filter);
 
   if (events && events.length > 0) {
     return { found: true, event: events[0] };
@@ -101,7 +107,7 @@ async function analyzeWithClaude(missedEvent, context, wasFoundInfo) {
 
 Today's date is: ${today}
 
-Title: ${missedEvent.title}
+Title: ${missedEvent.title || '(not provided)'}
 URL: ${missedEvent.url}
 
 My current trusted sources:
@@ -272,7 +278,7 @@ export async function analyzeUnprocessedFeedback(runStats = null) {
 
   // Process each missed event
   for (const item of feedback) {
-    console.log(`  🔍 Analyzing: "${item.title}"`);
+    console.log(`  🔍 Analyzing: "${item.title || '(no title)'}"`);
     console.log(`     URL: ${item.url}`);
 
     const actionsTaken = [];
