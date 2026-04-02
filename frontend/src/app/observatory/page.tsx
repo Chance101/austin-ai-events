@@ -8,7 +8,7 @@ import { AgentRun, Source, SearchQuery, DailyStats, HumanActionItem } from '@/ty
 import { Event } from '@/types/event';
 
 // Components
-import HowItWorks from '@/components/observatory/HowItWorks';
+import SystemArchitecture from '@/components/observatory/SystemArchitecture';
 import LastRunCard from '@/components/observatory/LastRunCard';
 import ActivityFeed from '@/components/observatory/ActivityFeed';
 import DiscoveryStats from '@/components/observatory/DiscoveryStats';
@@ -238,9 +238,22 @@ export default function ObservatoryPage() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* How It Works - Full Width */}
+        {/* The Bigger Picture - Top of page */}
+        <div className="mb-8">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 p-6">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-lg">💡</span>
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">The Big Picture</h3>
+            </div>
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              This is a fully autonomous system. It discovers events, monitors its own health, and fixes its own code — every day, without human intervention. The Observatory exists to give transparency into this process so people can see how an autonomous AI system actually works. This isn&apos;t a black box.
+            </p>
+          </div>
+        </div>
+
+        {/* System Architecture - Full Width */}
         <div className="mb-12">
-          <HowItWorks />
+          <SystemArchitecture />
         </div>
 
         {/* ============================================ */}
