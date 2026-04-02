@@ -101,6 +101,12 @@ async function discoverEvents() {
     runStats.feedbackAnalyzed = feedbackStats.analyzed;
     runStats.feedbackSourcesAdded = feedbackStats.sourcesAdded;
     runStats.feedbackQueriesAdded = feedbackStats.queriesAdded;
+
+    // Inject scraped feedback events into the pipeline
+    if (feedbackStats.scrapedEvents && feedbackStats.scrapedEvents.length > 0) {
+      allDiscoveredEvents.push(...feedbackStats.scrapedEvents);
+      console.log(`  📥 ${feedbackStats.scrapedEvents.length} event(s) scraped from user feedback — queued for validation\n`);
+    }
   } catch (error) {
     console.error('Feedback analysis error:', error.message);
     runStats.errors++;

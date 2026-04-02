@@ -431,6 +431,10 @@ The outer loop is a Claude Code scheduled task that runs daily, 2 hours after th
 ### User Feedback Form
 The calendar page includes a "Missing an event?" button (`FeedbackButton.tsx`) that lets users suggest events the agent missed. URL is required, optional comment. Submissions go to `feedback_missed_events` table via `/api/feedback`. Protected by: rate limiting (3/hour per IP), honeypot field for bots, IP hashing (no raw IPs stored).
 
+**Direct ingestion:** When feedback is processed (Phase 1.5), the system directly scrapes the submitted URL using `fetchEventDetails()` from `websearch.js`. If event data is extracted (title + start_time), it's fed into the normal pipeline for dedup, validation, classification, and upsert — same run, no delay. Claude analysis still runs afterward for source/query discovery.
+
+**Platform-aware source matching:** `checkSourceKnown()` uses path-prefix matching for multi-tenant platforms (Luma, Meetup, Eventbrite) instead of domain matching. `lu.ma/some-event` does NOT match known source `lu.ma/aitx`.
+
 ### Observatory Page Architecture
 The Observatory (`/observatory`) provides transparency through three layers:
 

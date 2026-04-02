@@ -1,8 +1,22 @@
 import { config } from '../config.js';
 import { getClient } from '../utils/claude.js';
 import { getSupabase } from '../utils/supabase.js';
+import { fetchEventDetails } from '../sources/websearch.js';
 
 const supabase = getSupabase();
+
+/**
+ * Multi-tenant event platforms where domain-level matching is too broad.
+ * For these, a submitted event URL (lu.ma/some-event) should NOT match
+ * a known source (lu.ma/aitx) just because they share a domain.
+ */
+const PLATFORM_DOMAINS = [
+  'lu.ma',
+  'luma.com',
+  'meetup.com',
+  'eventbrite.com',
+  'eventbrite.co.uk',
+];
 
 /**
  * Extract domain from URL for source matching
@@ -29,23 +43,40 @@ function normalizeUrl(url) {
 }
 
 /**
- * Check if a source URL is already known in the sources table
+ * Check if a source URL is already known in the sources table.
+ * For multi-tenant platforms (Luma, Meetup, Eventbrite), requires path-prefix
+ * match — lu.ma/some-event does NOT match source lu.ma/aitx.
  */
 async function checkSourceKnown(eventUrl) {
   const domain = extractDomain(eventUrl);
   if (!domain) return { known: false, source: null };
 
-  // Check for exact URL match or domain match
+  const isPlatform = PLATFORM_DOMAINS.some(d => domain === d || domain.endsWith('.' + d));
+
   const { data: sources } = await supabase
     .from('sources')
     .select('*')
     .or(`url.ilike.%${domain}%`);
 
-  if (sources && sources.length > 0) {
-    return { known: true, source: sources[0] };
+  if (!sources || sources.length === 0) {
+    return { known: false, source: null };
   }
 
-  return { known: false, source: null };
+  if (isPlatform) {
+    // For platforms, require the submitted URL's path to start with the source's path
+    const submittedNorm = normalizeUrl(eventUrl);
+    for (const source of sources) {
+      const sourceNorm = normalizeUrl(source.url);
+      if (submittedNorm.startsWith(sourceNorm)) {
+        return { known: true, source };
+      }
+    }
+    // Platform domain but no path match — not a known source
+    return { known: false, source: null };
+  }
+
+  // Non-platform: domain match is sufficient
+  return { known: true, source: sources[0] };
 }
 
 /**
@@ -253,6 +284,7 @@ export async function analyzeUnprocessedFeedback(runStats = null) {
     queriesAdded: 0,
     alreadyKnown: 0,
     claudeApiCalls: 0,
+    scrapedEvents: [],
   };
 
   // Fetch unprocessed feedback
@@ -296,6 +328,32 @@ export async function analyzeUnprocessedFeedback(runStats = null) {
     const wasFound = await checkIfEventWasFound(item.url, item.title);
     if (wasFound.found) {
       console.log(`     ⚠ Event was found in DB (may have been rejected)`);
+    }
+
+    // Step 2.5: Try to directly scrape the submitted URL
+    if (!wasFound.found) {
+      console.log(`     🔗 Attempting to scrape event from URL...`);
+      try {
+        const eventData = await fetchEventDetails(item.url);
+        if (eventData && eventData.title && eventData.start_time) {
+          const scrapedEvent = {
+            ...eventData,
+            url: item.url,
+            source: 'web-search',
+            source_event_id: null,
+            _sourceUrl: item.url,
+            _sourceTier: 'probation',
+            _fromFeedback: true,
+          };
+          stats.scrapedEvents.push(scrapedEvent);
+          actionsTaken.push(`Scraped event: "${eventData.title}"`);
+          console.log(`     ✅ Scraped: "${eventData.title}"`);
+        } else {
+          console.log(`     ⚠️  Could not extract event data from URL`);
+        }
+      } catch (scrapeError) {
+        console.log(`     ⚠️  Scrape failed: ${scrapeError.message}`);
+      }
     }
 
     // Step 3: Use Claude to analyze and suggest corrections
@@ -356,6 +414,7 @@ export async function analyzeUnprocessedFeedback(runStats = null) {
   console.log('  📝 Feedback Analysis Summary');
   console.log('  ' + '─'.repeat(40));
   console.log(`    Analyzed:          ${stats.analyzed} missed events`);
+  console.log(`    Events scraped:    ${stats.scrapedEvents.length}`);
   console.log(`    Sources added:     ${stats.sourcesAdded}`);
   console.log(`    Queries added:     ${stats.queriesAdded}`);
   console.log(`    Already known:     ${stats.alreadyKnown}`);

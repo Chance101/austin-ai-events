@@ -8,7 +8,7 @@ import { decodeHtmlEntities } from '../utils/html.js';
  * @param {string} url - Event page URL
  * @returns {Object|null} Enriched event data or null if extraction fails
  */
-async function fetchEventDetails(url) {
+export async function fetchEventDetails(url) {
   try {
     const response = await fetch(url, {
       headers: {

@@ -14,6 +14,15 @@ export interface StewardshipEntry {
 
 export const stewardshipLog: StewardshipEntry[] = [
   {
+    id: 'feedback-direct-ingestion',
+    date: '2026-04-02',
+    title: 'Direct Event Ingestion from User Feedback',
+    problem: 'When users submitted event URLs via the "Missing an event?" form, the system never actually fetched the event. It checked if the domain was "known" (matching lu.ma to AITX even though the submitted event was from a different organizer) and created search queries for future discovery. Users waited 1-2 days for events that might never appear. Additionally, source matching was domain-level — lu.ma, Meetup, and Eventbrite are platforms with many organizers, not single sources.',
+    action: 'Three changes: (1) Fixed source matching to require path-prefix match for multi-tenant platforms instead of domain match. (2) Added direct scraping of submitted URLs using the existing fetchEventDetails function — events are scraped in Phase 1.5 and fed into the normal pipeline for dedup, validation, classification, and upsert. (3) Wired scraped events into allDiscoveredEvents in index.js so they flow through the same pipeline as every other event.',
+    result: 'User-submitted events are now scraped and ingested in the same agent run — no more 1-2 day delays. Platform source matching is accurate. The feedback form becomes a direct path to the calendar while still going through all quality controls.',
+    category: 'capability',
+  },
+  {
     id: 'cross-source-dedup',
     date: '2026-03-30',
     title: 'Cross-Source Duplicate Detection',
