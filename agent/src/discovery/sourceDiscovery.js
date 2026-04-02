@@ -613,13 +613,18 @@ export async function getTrustedSources() {
 
 /**
  * Get DB-discovered sources eligible for scraping
- * Returns all non-config, non-demoted sources, limited to 10 per run
+ * Returns all non-config, non-demoted sources, limited to 10 per run.
+ * Ordered by last_scraped (NULLS FIRST) so never-scraped sources get
+ * evaluated quickly, then by trust_score as tiebreaker. This ensures
+ * rotation through all probation sources rather than always picking
+ * the same high-scored ones.
  */
 export async function getProbationSources() {
   const { data, error } = await supabase
     .from('sources')
     .select('*')
     .in('trust_tier', ['probation', 'trusted'])
+    .order('last_scraped', { ascending: true, nullsFirst: true })
     .order('trust_score', { ascending: false })
     .limit(10);
 

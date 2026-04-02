@@ -276,7 +276,7 @@ Web search finds URL → PROBATION (every event validated by Claude)
 **SCRAPE_ALL=1**: Environment variable bypasses the weekly schedule, scraping all config sources. Useful for debugging.
 
 **Key Functions in `sourceDiscovery.js`:**
-- `getProbationSources()`: Returns up to 10 non-config, non-demoted DB sources per run
+- `getProbationSources()`: Returns up to 10 non-config, non-demoted DB sources per run, ordered by `last_scraped ASC NULLS FIRST` (rotation — never-scraped sources go first, then longest-since-scraped)
 - `updateSourceValidationStats()`: Tracks pass/fail counts, demotes at <50% after 5 events
 - `updateSourceStats()`: Tracks consecutive empty scrapes, demotes at 5
 - `isBroadSearchUrl()`: Filters garbage URLs (meetup.com/find/, eventbrite.com/d/, etc.)
