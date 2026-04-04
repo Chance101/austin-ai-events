@@ -2,6 +2,7 @@ import { getJson } from 'serpapi';
 import * as cheerio from 'cheerio';
 import { config } from '../config.js';
 import { decodeHtmlEntities } from '../utils/html.js';
+import { extractEventsFromNextData } from '../utils/nextdata.js';
 
 /**
  * Fetch an event page and extract full details including end_time
@@ -51,6 +52,14 @@ export async function fetchEventDetails(url) {
         // JSON parse error, continue
       }
     });
+
+    // If JSON-LD found nothing, try __NEXT_DATA__ as generic fallback
+    if (!eventData) {
+      const nextDataEvents = extractEventsFromNextData($, { sourceUrl: url });
+      if (nextDataEvents.length > 0) {
+        eventData = nextDataEvents[0];
+      }
+    }
 
     // Meetup fallback: if JSON-LD is missing venue, try Apollo state
     if (url.includes('meetup.com') && eventData && !eventData.venue_name) {

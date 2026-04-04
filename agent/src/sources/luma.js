@@ -1,5 +1,6 @@
 import * as cheerio from 'cheerio';
 import { decodeHtmlEntities } from '../utils/html.js';
+import { ScrapeResult } from '../utils/scrapeResult.js';
 
 /**
  * Scrape events from a Lu.ma calendar page
@@ -20,7 +21,7 @@ export async function scrapeLuma(sourceConfig) {
 
     if (!response.ok) {
       console.error(`    Failed to fetch ${sourceConfig.url}: ${response.status}`);
-      return events;
+      return ScrapeResult.fetchFailed();
     }
 
     const html = await response.text();
@@ -160,5 +161,8 @@ export async function scrapeLuma(sourceConfig) {
     console.error(`    Error scraping Lu.ma ${sourceConfig.id}:`, error.message);
   }
 
-  return events;
+  if (events.length === 0) {
+    return ScrapeResult.parseUncertain();
+  }
+  return ScrapeResult.success(events);
 }

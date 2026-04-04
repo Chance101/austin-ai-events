@@ -1,5 +1,7 @@
 import * as cheerio from 'cheerio';
 import { decodeHtmlEntities } from '../utils/html.js';
+import { extractEventsFromNextData } from '../utils/nextdata.js';
+import { ScrapeResult } from '../utils/scrapeResult.js';
 
 /**
  * Generic scraper for websites with event listings
@@ -17,7 +19,7 @@ export async function scrapeGeneric(sourceConfig) {
 
     if (!response.ok) {
       console.error(`Failed to fetch ${sourceConfig.url}: ${response.status}`);
-      return events;
+      return ScrapeResult.fetchFailed();
     }
 
     const html = await response.text();
@@ -53,6 +55,16 @@ export async function scrapeGeneric(sourceConfig) {
         // JSON parse error
       }
     });
+
+    // If no JSON-LD, try __NEXT_DATA__ extraction
+    if (events.length === 0) {
+      const nextDataEvents = extractEventsFromNextData($, {
+        sourceId: sourceConfig.id,
+        sourceName: sourceConfig.name,
+        sourceUrl: sourceConfig.url,
+      });
+      events.push(...nextDataEvents);
+    }
 
     // If no structured data, try common patterns
     if (events.length === 0) {
@@ -112,9 +124,15 @@ export async function scrapeGeneric(sourceConfig) {
 
   // Dedupe by URL
   const seen = new Set();
-  return upcoming.filter(e => {
+  const deduped = upcoming.filter(e => {
     if (seen.has(e.url)) return false;
     seen.add(e.url);
     return true;
   });
+
+  // If HTML was received but no events extracted, signal parse uncertainty
+  if (deduped.length === 0) {
+    return ScrapeResult.parseUncertain();
+  }
+  return ScrapeResult.success(deduped);
 }
