@@ -18,6 +18,7 @@ import { analyzeUnprocessedFeedback } from './feedback/analyzeFeedback.js';
 import { runMonitor } from './monitor.js';
 import { RunDecisionLog } from './utils/decisionLog.js';
 import { checkAustinLocation, isMalformedTitle } from './utils/filters.js';
+import { ScrapeResult } from './utils/scrapeResult.js';
 import { classifyScrapeError, classifySilentFailure } from './utils/errors.js';
 
 /**
@@ -228,8 +229,12 @@ async function discoverEvents() {
       console.log(`  → ${source.name} (${source.type})`);
 
       let events = [];
+      let scrapeStatus = 'success';
       try {
-        events = await scrapeSource(source);
+        const rawResult = await scrapeSource(source);
+        const result = ScrapeResult.from(rawResult);
+        events = result.events;
+        scrapeStatus = result.status;
       } catch (firstError) {
         const classified = classifyScrapeError(firstError, { source: source.name });
 
@@ -237,7 +242,10 @@ async function discoverEvents() {
           console.warn(`    ⚠️  ${classified.type} error, retrying in 2s: ${classified.message}`);
           await new Promise(resolve => setTimeout(resolve, 2000));
           try {
-            events = await scrapeSource(source);
+            const retryRaw = await scrapeSource(source);
+            const retryResult = ScrapeResult.from(retryRaw);
+            events = retryResult.events;
+            scrapeStatus = retryResult.status;
           } catch (retryError) {
             // Retry also failed — reclassify and throw to outer catch
             throw retryError;
@@ -255,25 +263,36 @@ async function discoverEvents() {
       runStats.sourceResults.push({ name: source.name, url: source.url, events: events.length });
 
       if (events.length === 0) {
-        console.warn(`    ⚠️  ${source.name} returned 0 events — may be silently failing`);
+        if (scrapeStatus === 'parse_uncertain') {
+          console.warn(`    ⚠️  ${source.name} returned 0 events (parse_uncertain — HTML received but couldn't extract)`);
+          decisionLog.log({
+            event: source.name,
+            source: source.id || source.name,
+            stage: 'scrape',
+            outcome: 'parse_failure',
+            reason: 'HTML received but no events could be extracted — scraper may need updating',
+          });
+        } else {
+          console.warn(`    ⚠️  ${source.name} returned 0 events — may be silently failing`);
 
-        // Classify the silent failure using consecutive empty scrape count from DB
-        let sourceData = null;
-        try {
-          const supabaseClient = getSupabase();
-          const { data } = await supabaseClient
-            .from('sources')
-            .select('consecutive_empty_scrapes, name')
-            .eq('url', source.url)
-            .single();
-          sourceData = data;
-        } catch { /* ignore — classification will use defaults */ }
+          // Classify the silent failure using consecutive empty scrape count from DB
+          let sourceData = null;
+          try {
+            const supabaseClient = getSupabase();
+            const { data } = await supabaseClient
+              .from('sources')
+              .select('consecutive_empty_scrapes, name')
+              .eq('url', source.url)
+              .single();
+            sourceData = data;
+          } catch { /* ignore — classification will use defaults */ }
 
-        const silentClassification = classifySilentFailure(
-          { consecutive_empty_scrapes: sourceData?.consecutive_empty_scrapes || 0, name: source.name },
-          0
-        );
-        console.log(`    📊 Silent failure classification: ${silentClassification.type} — ${silentClassification.message}`);
+          const silentClassification = classifySilentFailure(
+            { consecutive_empty_scrapes: sourceData?.consecutive_empty_scrapes || 0, name: source.name },
+            0
+          );
+          console.log(`    📊 Silent failure classification: ${silentClassification.type} — ${silentClassification.message}`);
+        }
       }
 
       // Attach source metadata to each event for conditional validation
@@ -287,7 +306,7 @@ async function discoverEvents() {
 
       // Update source stats in DB
       if (source.fromDb || source.url) {
-        await updateSourceStats(source.url, events.length).catch(() => {});
+        await updateSourceStats(source.url, events.length, scrapeStatus).catch(() => {});
       }
 
     } catch (error) {

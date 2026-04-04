@@ -637,14 +637,18 @@ export async function getProbationSources() {
 }
 
 /**
- * Update source statistics after scraping
- * Tracks consecutive empty scrapes and demotes after 5
+ * Update source statistics after scraping.
+ * Tracks consecutive empty scrapes (demotes after 5) and
+ * consecutive parse failures (escalates after 3).
+ * @param {string} sourceUrl
+ * @param {number} eventsFound
+ * @param {string} status - 'success' | 'parse_uncertain'
  */
-export async function updateSourceStats(sourceUrl, eventsFound) {
+export async function updateSourceStats(sourceUrl, eventsFound, status = 'success') {
   // First get current source data
   const { data: source } = await supabase
     .from('sources')
-    .select('consecutive_empty_scrapes, trust_tier, name')
+    .select('consecutive_empty_scrapes, consecutive_parse_failures, trust_tier, name')
     .eq('url', sourceUrl)
     .single();
 
@@ -653,7 +657,33 @@ export async function updateSourceStats(sourceUrl, eventsFound) {
     events_found_count: eventsFound,
   };
 
-  if (eventsFound === 0) {
+  if (eventsFound > 0) {
+    // Events found — reset both counters
+    updates.consecutive_empty_scrapes = 0;
+    updates.consecutive_parse_failures = 0;
+  } else if (status === 'parse_uncertain') {
+    // Got HTML but couldn't extract — don't count toward empty scrapes (not the source's fault)
+    updates.consecutive_parse_failures = (source?.consecutive_parse_failures || 0) + 1;
+
+    // Escalate after 3 consecutive parse failures
+    if (updates.consecutive_parse_failures >= 3) {
+      console.log(`    🔧 Parse failure escalation: ${source?.name || sourceUrl} (${updates.consecutive_parse_failures} consecutive)`);
+      try {
+        await supabase.from('human_action_items').insert({
+          severity: 'warning',
+          category: 'broken_scraper',
+          title: `Parse failure: ${source?.name || sourceUrl} — HTML received but no events extracted (${updates.consecutive_parse_failures}x)`,
+          description: `Source at ${sourceUrl} is returning valid HTML but the scraper cannot extract events. The page structure may have changed or uses a format the scraper doesn't handle (e.g., client-side rendering, non-standard data format).`,
+          action_type: 'code_change',
+          affected_files: ['agent/src/sources/generic.js', 'agent/src/utils/nextdata.js'],
+          auto_fixable: true,
+        });
+      } catch (e) {
+        console.error(`    Error creating parse failure action item: ${e.message}`);
+      }
+    }
+  } else {
+    // Genuinely empty — count toward demotion
     updates.consecutive_empty_scrapes = (source?.consecutive_empty_scrapes || 0) + 1;
 
     // Demote after 5 consecutive empty scrapes (config sources get auto-skipped instead)
@@ -663,8 +693,6 @@ export async function updateSourceStats(sourceUrl, eventsFound) {
       updates.demoted_at = new Date().toISOString();
       console.log(`    ⬇️ Demoted source (5 empty scrapes): ${source?.name || sourceUrl}`);
     }
-  } else {
-    updates.consecutive_empty_scrapes = 0;
   }
 
   const { error } = await supabase

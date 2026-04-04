@@ -14,8 +14,8 @@ export class RunDecisionLog {
    * @param {Object} opts
    * @param {string} opts.event     - Event title (truncated for storage)
    * @param {string} opts.source    - Source name or id
-   * @param {string} opts.stage     - Pipeline stage: pre_filter | dedup_hash | dedup_fuzzy | dedup_claude | location_check | validation | classification | upsert
-   * @param {string} opts.outcome   - accepted | rejected | duplicate | updated | skipped | error
+   * @param {string} opts.stage     - Pipeline stage: scrape | pre_filter | dedup_hash | dedup_fuzzy | dedup_claude | location_check | validation | classification | upsert
+   * @param {string} opts.outcome   - accepted | rejected | duplicate | updated | skipped | error | parse_failure
    * @param {string} [opts.reason]  - Human-readable reason
    * @param {Object} [opts.details] - Extra context (e.g., { claudeCalled: true })
    */
@@ -45,7 +45,7 @@ export class RunDecisionLog {
     for (const d of this.decisions) {
       // --- by source ---
       if (!bySource[d.source]) {
-        bySource[d.source] = { accepted: 0, rejected: 0, duplicated: 0, updated: 0, skipped: 0, error: 0, reasons: {} };
+        bySource[d.source] = { accepted: 0, rejected: 0, duplicated: 0, updated: 0, skipped: 0, error: 0, parse_failure: 0, reasons: {} };
       }
       const src = bySource[d.source];
       if (d.outcome === 'accepted') src.accepted++;
@@ -54,6 +54,7 @@ export class RunDecisionLog {
       else if (d.outcome === 'updated') src.updated++;
       else if (d.outcome === 'skipped') src.skipped++;
       else if (d.outcome === 'error') src.error++;
+      else if (d.outcome === 'parse_failure') src.parse_failure++;
 
       if (d.reason && (d.outcome === 'rejected' || d.outcome === 'skipped')) {
         src.reasons[d.reason] = (src.reasons[d.reason] || 0) + 1;
