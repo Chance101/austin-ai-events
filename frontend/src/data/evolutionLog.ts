@@ -14,6 +14,15 @@ export interface StewardshipEntry {
 
 export const stewardshipLog: StewardshipEntry[] = [
   {
+    id: 'nextdata-parser-parse-failure',
+    date: '2026-04-04',
+    title: 'Shared __NEXT_DATA__ Parser + Parse Failure Detection',
+    problem: 'Scrapers silently failed on modern platforms that use Next.js server-rendered data instead of JSON-LD. The luma.com/austin city page had 3 AI events visible but the scraper returned 0. Worse, the system treated "couldn\'t parse" the same as "no events exist" — incrementing the empty scrape counter and eventually demoting perfectly good sources for the scraper\'s inability, not the source\'s quality.',
+    action: 'Built a shared __NEXT_DATA__ extraction utility (nextdata.js) that handles Luma city pages, Meetup Apollo state, and generic Next.js patterns with a recursive deep walk fallback. Integrated as a fallback in both fetchEventDetails (web search) and scrapeGeneric (probation sources). Added ScrapeResult envelope so scrapers distinguish "genuinely empty" from "couldn\'t parse." Parse failures skip the demotion counter and escalate to the repair agent after 3 consecutive occurrences.',
+    result: 'Scrapers now handle the two most common data formats on the web (JSON-LD + Next.js __NEXT_DATA__). Sources are no longer punished for scraper limitations. Parse failures flow through the full autonomy loop: detection → tracking → escalation → outer loop fix → verification.',
+    category: 'capability',
+  },
+  {
     id: 'feedback-direct-ingestion',
     date: '2026-04-02',
     title: 'Direct Event Ingestion from User Feedback',

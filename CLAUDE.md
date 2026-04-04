@@ -255,6 +255,17 @@ Scraper errors are classified in `utils/errors.js` into three categories:
 
 The scraper loop in `index.js` catches errors, classifies them, and retries transient failures once before logging.
 
+### Parse Failure Detection
+Scrapers return `ScrapeResult` envelopes (`utils/scrapeResult.js`) that distinguish "genuinely empty" from "couldn't parse":
+- `ScrapeResult.success(events)`: Normal result — count toward demotion if empty
+- `ScrapeResult.parseUncertain()`: Got HTML but couldn't extract — skip demotion counter, track separately via `consecutive_parse_failures`
+- After 3 consecutive parse failures, escalates to `human_action_items` for the outer loop to fix
+
+Backward compatible: scrapers returning bare arrays are wrapped via `ScrapeResult.from()`.
+
+### Shared __NEXT_DATA__ Parser
+`utils/nextdata.js` provides `extractEventsFromNextData($)` — a shared fallback for pages that use Next.js server-rendered data instead of JSON-LD. Handles Luma city pages, Meetup Apollo state, and generic Next.js patterns with a recursive deep walk (depth limit 8). Used by `fetchEventDetails` (websearch), `scrapeGeneric` (probation sources). Chain: JSON-LD → __NEXT_DATA__ → CSS selectors.
+
 ### Source Lifecycle
 Sources have two entry paths and a simple lifecycle:
 
