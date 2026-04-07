@@ -100,6 +100,32 @@ export const config = {
   ],
 };
 
+/**
+ * Multi-tenant event platforms where domain-level matching is too broad.
+ * Each URL path on these platforms is a completely independent organizer/calendar.
+ * luma.com/aitx and luma.com/ai-tinkerers are as different as two separate websites.
+ * Used by: skip_source guardrails, feedback source matching, monitor reasoning.
+ */
+export const PLATFORM_DOMAINS = [
+  'lu.ma',
+  'luma.com',
+  'meetup.com',
+  'eventbrite.com',
+  'eventbrite.co.uk',
+];
+
+/**
+ * Check if a URL is on a known multi-tenant platform.
+ */
+export function isMultiTenantPlatform(url) {
+  try {
+    const hostname = new URL(url).hostname.replace(/^www\./, '');
+    return PLATFORM_DOMAINS.some(d => hostname === d || hostname.endsWith('.' + d));
+  } catch {
+    return false;
+  }
+}
+
 // Validate required config
 export function validateConfig() {
   const required = [

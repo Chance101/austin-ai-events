@@ -266,6 +266,14 @@ Backward compatible: scrapers returning bare arrays are wrapped via `ScrapeResul
 ### Shared __NEXT_DATA__ Parser
 `utils/nextdata.js` provides `extractEventsFromNextData($)` — a shared fallback for pages that use Next.js server-rendered data instead of JSON-LD. Handles Luma city pages, Meetup Apollo state, and generic Next.js patterns with a recursive deep walk (depth limit 8). Used by `fetchEventDetails` (websearch), `scrapeGeneric` (probation sources). Chain: JSON-LD → __NEXT_DATA__ → CSS selectors.
 
+### CRITICAL: Multi-Tenant Platform Awareness
+Luma, Meetup, and Eventbrite are **platforms** that host many independent organizers. Each URL path is a completely separate source:
+- `luma.com/aitx` and `luma.com/ai-tinkerers` are as different as two separate websites
+- `meetup.com/austin-python` and `meetup.com/austin-ml` are separate communities
+- Scraping one calendar on a platform does **NOT** cover any other calendar on that platform
+
+**Never assume a source is "already covered" because we scrape a different path on the same domain.** When evaluating source coverage, deciding to skip/demote, or reasoning about whether an organization's events are captured, match on the full URL path — not the domain. Two different organizers on Luma are two different sources, period.
+
 ### Source Lifecycle
 Sources have two entry paths and a simple lifecycle:
 
@@ -415,6 +423,8 @@ The outer loop is a Claude Code scheduled task that runs daily, 2 hours after th
 - **Oscillation protection:** If `attempt_count >= 3` and `repair_status = 'failed'`, freeze the item and create a GitHub issue
 - **Rollback:** If the monitor marks a repair as `verification_result = 'failed'`, the outer loop should `git revert` the commit on its next run
 - **Heartbeat:** The outer loop writes a heartbeat record to `repair_log` on every run (even with nothing to fix) so the monitor can detect if the outer loop is down
+- **Multi-tenant platform awareness:** See "CRITICAL: Multi-Tenant Platform Awareness" above. When resolving action items about sources, never conclude a source is "already covered" based on domain match alone. `luma.com/aitx` does not cover `luma.com/ai-tinkerers` — they are independent organizers on a shared platform.
+- **No direct source lifecycle changes via SQL:** The outer loop must NEVER modify `sources.trust_tier` via direct SQL (UPDATE/INSERT). Source demotions happen only through the pipeline's auto-demotion logic (in `sourceDiscovery.js`) or the monitor's `skip_source` action (in `monitor.js`), both of which have code-level guardrails including multi-tenant platform checks. If an action item involves source changes, modify the config or code — do not bypass the guardrails with raw SQL.
 
 ## Critical Implementation Details
 

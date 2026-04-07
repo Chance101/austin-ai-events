@@ -13,7 +13,7 @@ export async function scrapeGeneric(sourceConfig) {
   try {
     const response = await fetch(sourceConfig.url, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; AustinAIEventsBot/1.0)',
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       },
     });
 
@@ -32,22 +32,35 @@ export async function scrapeGeneric(sourceConfig) {
         const items = Array.isArray(data) ? data : [data];
 
         items.forEach(item => {
-          if (item['@type'] === 'Event') {
+          // Collect Event objects — may be top-level or nested in ItemList > ListItem
+          const eventObjects = [];
+          if (item['@type']?.endsWith('Event')) {
+            eventObjects.push(item);
+          } else if (item['@type'] === 'ItemList' && Array.isArray(item.itemListElement)) {
+            for (const li of item.itemListElement) {
+              const nested = li.item || li;
+              if (nested['@type']?.endsWith('Event')) {
+                eventObjects.push(nested);
+              }
+            }
+          }
+
+          for (const evt of eventObjects) {
             events.push({
-              title: decodeHtmlEntities(item.name),
-              description: decodeHtmlEntities(item.description),
-              url: item.url || sourceConfig.url,
+              title: decodeHtmlEntities(evt.name),
+              description: decodeHtmlEntities(evt.description),
+              url: evt.url || sourceConfig.url,
               source: sourceConfig.id,
-              source_event_id: item.identifier || null,
-              start_time: item.startDate,
-              end_time: item.endDate,
-              venue_name: item.location?.name,
-              address: typeof item.location?.address === 'string'
-                ? item.location.address
-                : item.location?.address?.streetAddress,
-              image_url: item.image,
-              organizer: item.organizer?.name || sourceConfig.name,
-              is_free: item.isAccessibleForFree,
+              source_event_id: evt.identifier || null,
+              start_time: evt.startDate,
+              end_time: evt.endDate,
+              venue_name: evt.location?.name,
+              address: typeof evt.location?.address === 'string'
+                ? evt.location.address
+                : evt.location?.address?.streetAddress,
+              image_url: evt.image,
+              organizer: evt.organizer?.name || sourceConfig.name,
+              is_free: evt.isAccessibleForFree,
             });
           }
         });

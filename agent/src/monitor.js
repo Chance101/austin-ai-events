@@ -1,4 +1,4 @@
-import { config, validateConfig } from './config.js';
+import { config, validateConfig, isMultiTenantPlatform } from './config.js';
 import { getClient } from './utils/claude.js';
 import { getSupabase } from './utils/supabase.js';
 
@@ -391,6 +391,13 @@ Did the queries you created recently produce events? Were they recycled? Use thi
 - Search queries in the database drive what gets searched — you control these queries
 - Queries with priority below 0.05 are automatically recycled. No cap on active queries — recycling keeps the table clean.
 
+## CRITICAL: Multi-Tenant Platform Awareness
+Luma, Meetup, and Eventbrite are PLATFORMS that host many independent organizers. Each path is a completely separate source:
+- luma.com/aitx and luma.com/ai-tinkerers are as different as two separate websites
+- meetup.com/austin-python and meetup.com/austin-ml are separate communities
+- Scraping one calendar on a platform does NOT cover any other calendar on that platform
+NEVER assume a source is "already covered" because we scrape a different path on the same domain. When evaluating source coverage or deciding to skip/demote a source, match on the FULL URL path, not the domain.
+
 ## Your Role
 You are the ONLY entity that creates new search queries. The system no longer auto-generates generic queries. Every query you create should be targeted and strategic, based on specific gaps you identify.
 
@@ -541,6 +548,7 @@ You are the sole query strategist. Every query you create must be purposeful:
   Sets trust_tier to 'demoted'. If the source becomes active again in the future, web search will rediscover it.
   Provide source_url. IMPORTANT: You may ONLY skip DB-discovered sources (probation/trusted tier).
   For config sources, use escalate_to_human instead — config sources were manually vetted and require human review.
+  NEVER skip a source because "it's already covered by another source on the same platform." luma.com/org-a and luma.com/org-b are completely independent sources. Match on full URL path, not domain.
 
 - **resolve_action_item**: Mark a previously escalated action item as resolved.
   Use when the underlying issue has been fixed (you can see this in the current run's data).
@@ -736,13 +744,18 @@ async function executeAutoActions(actions, reportId) {
             break;
           }
           // Guardrail 2: Don't skip sources that produced accepted events in last 28 days
+          // For multi-tenant platforms (Luma, Meetup, Eventbrite), match on URL path prefix
+          // not just domain — luma.com/aitx events should not block demoting luma.com/other-org
           const twentyEightDaysAgo = new Date(Date.now() - 28 * 24 * 60 * 60 * 1000).toISOString();
+          const urlForMatch = isMultiTenantPlatform(action.source_url)
+            ? new URL(action.source_url).hostname.replace(/^www\./, '') + new URL(action.source_url).pathname.replace(/\/$/, '')
+            : new URL(action.source_url).hostname;
           const { count: recentEventCount } = await supabase
             .from('events')
             .select('id', { count: 'exact', head: true })
             .eq('source', 'web-search')
             .gte('created_at', twentyEightDaysAgo)
-            .ilike('url', `%${new URL(action.source_url).hostname}%`);
+            .ilike('url', `%${urlForMatch}%`);
           if (recentEventCount > 0) {
             results.push({
               action: 'skip_source',

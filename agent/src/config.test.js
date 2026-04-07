@@ -115,6 +115,41 @@ describe('config', () => {
     });
   });
 
+  describe('isMultiTenantPlatform', () => {
+    it('identifies luma.com as multi-tenant', async () => {
+      const { isMultiTenantPlatform } = await import(`./config.js?bust=${Date.now()}-mt1`);
+      assert.strictEqual(isMultiTenantPlatform('https://luma.com/aitx'), true);
+    });
+
+    it('identifies lu.ma as multi-tenant', async () => {
+      const { isMultiTenantPlatform } = await import(`./config.js?bust=${Date.now()}-mt2`);
+      assert.strictEqual(isMultiTenantPlatform('https://lu.ma/some-event'), true);
+    });
+
+    it('identifies meetup.com as multi-tenant', async () => {
+      const { isMultiTenantPlatform } = await import(`./config.js?bust=${Date.now()}-mt3`);
+      assert.strictEqual(isMultiTenantPlatform('https://www.meetup.com/austin-python/events/'), true);
+    });
+
+    it('identifies eventbrite.com as multi-tenant', async () => {
+      const { isMultiTenantPlatform } = await import(`./config.js?bust=${Date.now()}-mt4`);
+      assert.strictEqual(isMultiTenantPlatform('https://www.eventbrite.com/e/some-event'), true);
+    });
+
+    it('does NOT flag non-platform domains', async () => {
+      const { isMultiTenantPlatform } = await import(`./config.js?bust=${Date.now()}-mt5`);
+      assert.strictEqual(isMultiTenantPlatform('https://austin-ai.org/events/'), false);
+      assert.strictEqual(isMultiTenantPlatform('https://www.aicamp.ai/event/eventsquery'), false);
+      assert.strictEqual(isMultiTenantPlatform('https://ai.utexas.edu/events'), false);
+    });
+
+    it('returns false for invalid URLs', async () => {
+      const { isMultiTenantPlatform } = await import(`./config.js?bust=${Date.now()}-mt6`);
+      assert.strictEqual(isMultiTenantPlatform('not-a-url'), false);
+      assert.strictEqual(isMultiTenantPlatform(''), false);
+    });
+  });
+
   describe('config structure', () => {
     it('has models.fast defined', async () => {
       const { config } = await import(`./config.js?bust=${Date.now()}-7`);

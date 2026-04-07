@@ -1,22 +1,9 @@
-import { config } from '../config.js';
+import { config, PLATFORM_DOMAINS } from '../config.js';
 import { getClient } from '../utils/claude.js';
 import { getSupabase } from '../utils/supabase.js';
 import { fetchEventDetails } from '../sources/websearch.js';
 
 const supabase = getSupabase();
-
-/**
- * Multi-tenant event platforms where domain-level matching is too broad.
- * For these, a submitted event URL (lu.ma/some-event) should NOT match
- * a known source (lu.ma/aitx) just because they share a domain.
- */
-const PLATFORM_DOMAINS = [
-  'lu.ma',
-  'luma.com',
-  'meetup.com',
-  'eventbrite.com',
-  'eventbrite.co.uk',
-];
 
 /**
  * Extract domain from URL for source matching

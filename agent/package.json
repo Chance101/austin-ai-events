@@ -8,7 +8,7 @@
     "start": "node src/index.js",
     "discover": "node src/index.js",
     "monitor": "node src/monitor.js",
-    "test": "node --test src/**/*.test.js"
+    "test": "node --test src/*.test.js src/**/*.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.52.0",
