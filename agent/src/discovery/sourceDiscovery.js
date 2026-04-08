@@ -731,7 +731,7 @@ export async function updateSourceStats(sourceUrl, eventsFound, status = 'succes
   // First get current source data
   const { data: source } = await supabase
     .from('sources')
-    .select('consecutive_empty_scrapes, consecutive_parse_failures, trust_tier, name')
+    .select('consecutive_empty_scrapes, consecutive_parse_failures, consecutive_fetch_failures, trust_tier, name')
     .eq('url', sourceUrl)
     .single();
 
@@ -744,10 +744,12 @@ export async function updateSourceStats(sourceUrl, eventsFound, status = 'succes
     // Events found — reset all counters
     updates.consecutive_empty_scrapes = 0;
     updates.consecutive_parse_failures = 0;
+    updates.consecutive_fetch_failures = 0;
   } else if (status === 'fetch_failed') {
     // HTTP failure — source may be alive but unreachable (bot blocking, rate limiting, down)
     // Don't count as "empty source" — the source isn't proven dead, we just can't reach it
-    console.log(`    📊 Fetch failed (HTTP ${diagnostics?.httpStatus || 'unknown'}) — not counting toward demotion`);
+    updates.consecutive_fetch_failures = (source?.consecutive_fetch_failures || 0) + 1;
+    console.log(`    📊 Fetch failed (HTTP ${diagnostics?.httpStatus || 'unknown'}) — tracking separately (${updates.consecutive_fetch_failures} consecutive)`);
   } else if (status === 'parse_uncertain') {
     // Got HTML but couldn't extract — don't count toward empty scrapes (not the source's fault)
     updates.consecutive_parse_failures = (source?.consecutive_parse_failures || 0) + 1;

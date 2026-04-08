@@ -111,7 +111,8 @@ austin-ai-events/
 │   │   │   ├── filters.js             # Austin location check + malformed title detection
 │   │   │   ├── filters.test.js        # Filter unit tests
 │   │   │   ├── scrapeDiagnostics.js   # Shared scraper diagnostic helpers (content signals, text snippets)
-│   │   │   └── supabase.js            # Database operations
+│   │   │   ├── supabase.js            # Database operations
+│   │   │   └── testScraper.js         # Run a single scraper for verification (CLI + import)
 │   │   ├── monitor.js                 # Self-monitoring agent (health reports + auto-fix)
 │   │   ├── discovery/
 │   │   │   └── sourceDiscovery.js     # Autonomous source discovery
@@ -275,9 +276,10 @@ Every scraper returns `ScrapeResult` envelopes with diagnostic data (`utils/scra
 - `contentVerification`: Haiku ground-truth check result when triggered
 
 **Diagnostic-aware demotion** (`sourceDiscovery.js`):
-- `fetch_failed` → don't count toward demotion (source not proven dead)
+- `fetch_failed` → tracked via `consecutive_fetch_failures` column, don't count toward demotion
 - `contentSignals.hasEventKeywords + 0 events` → treat as parse failure (parser broken, not empty source)
 - Only genuinely empty pages (no event keywords, HTTP 200) count toward the 3-strike demotion
+- On success, all three failure counters reset to 0
 
 **Content verification** (Phase 2 — ground truth):
 - Triggered when: config source + HTTP 200 + pageSize > 5KB + hasEventKeywords + 1+ consecutive failures
@@ -453,7 +455,9 @@ The outer loop is a Claude Code scheduled task that runs daily, 2 hours after th
 5. Make the fix, respecting the tier rules above
 6. **VERIFY the fix** (mandatory): Run the specific scraper against the live URL to confirm it returns events:
    ```bash
-   cd agent && node -e "import('./src/sources/SCRAPER.js').then(m => m.FUNCTION({id:'test',name:'test',url:'SOURCE_URL',type:'TYPE'}).then(r => console.log(JSON.stringify({events: r.events?.length ?? r.length, status: r.status}))))"
+   cd agent && node src/utils/testScraper.js <scraperType> <sourceUrl>
+   # Example: node src/utils/testScraper.js generic https://aitinkerers.org/events
+   # Available types: meetup, luma, generic, scrape, austinforum, aiaccelerator, austinai, leadersinai, aicamp, capitalfactory, utaustin
    ```
    If the scraper still returns 0 events, the fix did not work — do NOT commit. Log the failure and stop.
 7. Run `cd agent && npm test` — if tests fail, do not push, log failure to `repair_log`
