@@ -112,7 +112,7 @@ async function gatherMetrics(pipelineData = {}) {
     new Date(r.started_at) >= new Date(sevenDaysAgo)
   );
 
-  // Source performance from recent runs
+  // Source performance from recent runs (enriched with diagnostics from most recent)
   const sourcePerformance = {};
   for (const run of recentRuns.slice(0, 14)) {
     const results = run.source_results || [];
@@ -123,6 +123,43 @@ async function gatherMetrics(pipelineData = {}) {
       sourcePerformance[sr.name].totalEvents += sr.events || 0;
       sourcePerformance[sr.name].runs++;
       if ((sr.events || 0) === 0) sourcePerformance[sr.name].zeroRuns++;
+    }
+  }
+
+  // Enrich with diagnostics from the most recent run
+  const latestRun = recentRuns[0];
+  if (latestRun?.source_results) {
+    for (const sr of latestRun.source_results) {
+      if (sourcePerformance[sr.name] && sr.diagnostics) {
+        sourcePerformance[sr.name].lastDiagnostics = {
+          httpStatus: sr.diagnostics.httpStatus,
+          pageSize: sr.diagnostics.pageSize,
+          parseStrategy: sr.diagnostics.parseStrategy,
+          parseAttempts: sr.diagnostics.parseAttempts,
+          candidateElements: sr.diagnostics.candidateElements,
+          eventsPreFilter: sr.diagnostics.eventsPreFilter,
+          contentSignals: sr.diagnostics.contentSignals,
+          contentVerification: sr.diagnostics.contentVerification,
+          errors: sr.diagnostics.errors?.length > 0 ? sr.diagnostics.errors : undefined,
+        };
+        sourcePerformance[sr.name].scraperType = sr.scraperType;
+        sourcePerformance[sr.name].lastScrapeStatus = sr.scrapeStatus;
+      }
+    }
+  }
+
+  // Shared failure detection: group zero-event sources by scraperType
+  const scraperTypeFailures = {};
+  if (latestRun?.source_results) {
+    for (const sr of latestRun.source_results) {
+      if ((sr.events || 0) === 0 && sr.scraperType) {
+        if (!scraperTypeFailures[sr.scraperType]) scraperTypeFailures[sr.scraperType] = [];
+        scraperTypeFailures[sr.scraperType].push({
+          name: sr.name,
+          httpStatus: sr.diagnostics?.httpStatus,
+          scrapeStatus: sr.scrapeStatus,
+        });
+      }
     }
   }
 
@@ -230,6 +267,10 @@ async function gatherMetrics(pipelineData = {}) {
     activeQueries: queries.length,
     staleQueryCount: staleQueries.length,
     staleQueryNames: staleQueries.slice(0, 5).map(q => q.query_text),
+    // Shared failure detection: scraperTypes with multiple zero-event sources
+    scraperTypeFailures: Object.entries(scraperTypeFailures)
+      .filter(([, sources]) => sources.length >= 2)
+      .reduce((obj, [type, sources]) => { obj[type] = sources; return obj; }, {}),
     // Include raw data for Claude's analysis
     recentRunsSummary: recentRuns.slice(0, 10).map(r => ({
       date: r.started_at,
@@ -398,6 +439,18 @@ Luma, Meetup, and Eventbrite are PLATFORMS that host many independent organizers
 - Scraping one calendar on a platform does NOT cover any other calendar on that platform
 NEVER assume a source is "already covered" because we scrape a different path on the same domain. When evaluating source coverage or deciding to skip/demote a source, match on the FULL URL path, not the domain.
 
+## Scraper Diagnostics
+sourcePerformance now includes lastDiagnostics for each source from the most recent run: httpStatus, pageSize, parseStrategy, parseAttempts, candidateElements, contentSignals, contentVerification, and errors.
+
+When a source returns 0 events, ALWAYS check its diagnostics before acting:
+- httpStatus 403/429 → bot blocking or rate limiting. Escalate as "scraper_blocked" with affected_files pointing to the scraper file.
+- httpStatus 200 + pageSize > 5000 + contentSignals.hasEventKeywords + 0 events → PARSER BREAKAGE. The page has events the scraper can't extract. High-priority escalation.
+- httpStatus 200 + small page + no event keywords → source genuinely empty or inactive. Safe to count toward demotion.
+- contentVerification.hasEvents === true → CONFIRMED parser breakage. Critical severity escalation.
+- scraperTypeFailures shows multiple sources with same scraperType all returning 0 → shared scraper bug. Escalate ONCE with affected_files pointing to the shared scraper file (e.g., agent/src/sources/generic.js), not individual source escalations.
+
+When escalating, include the diagnostic data in the description so the repair agent knows what to investigate.
+
 ## Your Role
 You are the ONLY entity that creates new search queries. The system no longer auto-generates generic queries. Every query you create should be targeted and strategic, based on specific gaps you identify.
 
@@ -428,6 +481,7 @@ ${JSON.stringify({
     activeQueries: metrics.activeQueries,
     staleQueryCount: metrics.staleQueryCount,
     staleQueryNames: metrics.staleQueryNames,
+    scraperTypeFailures: metrics.scraperTypeFailures,
     recentRunsSummary: metrics.recentRunsSummary,
     sourcesWithIssues: metrics.sourcesWithIssues,
   }, null, 2)}
@@ -742,7 +796,17 @@ async function executeAutoActions(actions, reportId) {
             });
             break;
           }
-          // Guardrail 2: Don't skip sources that produced accepted events in last 28 days
+          // Guardrail 2: Block "already covered" reasoning for multi-tenant platforms
+          // Each path on Luma/Meetup/Eventbrite is an independent source ��� domain overlap is not coverage
+          if (isMultiTenantPlatform(action.source_url) && action.reason?.toLowerCase().includes('covered')) {
+            results.push({
+              action: 'skip_source',
+              detail: srcToSkip?.name || action.source_url,
+              result: 'Blocked: multi-tenant platform — each URL path is an independent source. "Already covered" by another path on the same domain is not valid reasoning.',
+            });
+            break;
+          }
+          // Guardrail 3: Don't skip sources that produced accepted events in last 28 days
           // For multi-tenant platforms (Luma, Meetup, Eventbrite), match on URL path prefix
           // not just domain — luma.com/aitx events should not block demoting luma.com/other-org
           const twentyEightDaysAgo = new Date(Date.now() - 28 * 24 * 60 * 60 * 1000).toISOString();

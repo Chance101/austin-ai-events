@@ -10,7 +10,7 @@ import { scrapeLeadersInAI } from './sources/leadersinai.js';
 import { scrapeAICamp } from './sources/aicamp.js';
 import { scrapeCapitalFactory } from './sources/capitalfactory.js';
 import { scrapeUTAustin } from './sources/utaustin.js';
-import { validateEvent, classifyEvent, extractLocationFromImage } from './utils/claude.js';
+import { validateEvent, classifyEvent, extractLocationFromImage, verifyPageHasEvents } from './utils/claude.js';
 import { findDuplicates, getEventHash } from './utils/dedup.js';
 import { upsertEvent, getExistingEvents, updateEventFields, logAgentRun, getSupabase } from './utils/supabase.js';
 import { discoverSources, getTrustedSources, getProbationSources, updateSourceStats, updateSourceValidationStats, getEventSearchQueries } from './discovery/sourceDiscovery.js';
@@ -311,6 +311,44 @@ async function discoverEvents() {
             0
           );
           console.log(`    📊 Silent failure classification: ${silentClassification.type} — ${silentClassification.message}`);
+        }
+      }
+
+      // Content verification: confirm parser breakage for config sources with suspicious diagnostics
+      if (events.length === 0
+          && !source.fromDb  // config source
+          && scrapeDiagnostics?.httpStatus === 200
+          && scrapeDiagnostics?.pageSize > 5000
+          && scrapeDiagnostics?.contentSignals?.hasEventKeywords
+          && scrapeDiagnostics?.pageTextSnippet) {
+        // Check consecutive empty scrapes to avoid triggering on first empty run
+        let consecutiveEmpties = 0;
+        try {
+          const supabaseClient = getSupabase();
+          const { data } = await supabaseClient
+            .from('sources')
+            .select('consecutive_empty_scrapes, consecutive_parse_failures')
+            .eq('url', source.url)
+            .single();
+          consecutiveEmpties = (data?.consecutive_empty_scrapes || 0) + (data?.consecutive_parse_failures || 0);
+        } catch { /* ignore */ }
+
+        if (consecutiveEmpties >= 1) {
+          console.log(`    🔍 Content verification: page has event keywords + ${consecutiveEmpties} consecutive failures — checking with Haiku`);
+          const verification = await verifyPageHasEvents(scrapeDiagnostics.pageTextSnippet, source.name, runStats);
+          scrapeDiagnostics.contentVerification = verification;
+          if (verification.hasEvents) {
+            console.warn(`    🚨 CONFIRMED parser breakage: ${source.name} — page has events but scraper found 0`);
+            decisionLog.log({
+              event: source.name,
+              source: source.id || source.name,
+              stage: 'content_verification',
+              outcome: 'parser_breakage_confirmed',
+              reason: `Page has events but scraper extracted 0: ${verification.evidence}`,
+            });
+          } else {
+            console.log(`    ✅ Content verification: ${source.name} — page does not appear to have events (${verification.evidence})`);
+          }
         }
       }
 

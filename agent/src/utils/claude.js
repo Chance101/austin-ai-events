@@ -317,3 +317,49 @@ The same real-world event is often listed on multiple platforms with completely 
 
   return { isDuplicate: false, confidence: 0, reason: 'Failed to parse' };
 }
+
+/**
+ * Verify whether a page contains event listings (ground truth check).
+ * Used when a config source returns 0 events but page has content — confirms
+ * parser breakage vs. genuinely empty source.
+ *
+ * @param {string} pageText - First ~3000 chars of page text (HTML stripped)
+ * @param {string} sourceName - Name of the source for context
+ * @param {Object} runStats - Optional run stats for tracking
+ * @returns {{ hasEvents: boolean, evidence: string }}
+ */
+export async function verifyPageHasEvents(pageText, sourceName, runStats = null) {
+  if (!pageText || pageText.length < 100) {
+    return { hasEvents: false, evidence: 'Page text too short to analyze' };
+  }
+
+  const anthropic = getClient();
+  const snippet = pageText.substring(0, 3000);
+
+  try {
+    const response = await anthropic.messages.create({
+      model: config.models.fast,
+      max_tokens: 200,
+      messages: [{
+        role: 'user',
+        content: `Does this page contain event listings (dates, event names, registration links)?
+Answer with JSON only: {"hasEvents": true/false, "evidence": "brief explanation of what you see or don't see"}
+
+Page text from ${sourceName}:
+${snippet}`,
+      }],
+    });
+
+    if (runStats) runStats.claudeApiCalls++;
+
+    const text = response.content[0].text;
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[0]);
+    }
+  } catch (e) {
+    console.error(`    Content verification failed for ${sourceName}: ${e.message}`);
+  }
+
+  return { hasEvents: false, evidence: 'Verification failed' };
+}
