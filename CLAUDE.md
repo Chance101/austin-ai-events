@@ -134,7 +134,8 @@ austin-ai-events/
         ├── 009_decision_log.sql        # Decision summary JSONB on agent_runs
         ├── 010_monitor_enrichment.sql  # Action review + decision summary on monitor_reports
         ├── 011_source_context.sql      # Per-source validation context on sources
-        └── 012_human_action_items.sql  # Human escalation action items table
+        ├── 012_human_action_items.sql  # Human escalation action items table
+        └── add_consecutive_fetch_failures.sql  # Separate fetch failure tracking on sources
 ```
 
 ## Key Database Schema
@@ -156,7 +157,9 @@ austin-ai-events/
 - `sources`: Tracked event sources for autonomous discovery
   - `trust_tier`: 'config' | 'probation' | 'demoted' (trusted tier deprecated — all DB sources stay probation)
   - `validation_pass_count`, `validation_fail_count`: Track event validation outcomes
-  - `consecutive_empty_scrapes`: Track scrapes that return no events
+  - `consecutive_empty_scrapes`: Track genuinely empty scrapes (no event content on page)
+  - `consecutive_parse_failures`: Track scrapes where HTML received but parser couldn't extract
+  - `consecutive_fetch_failures`: Track HTTP failures (403, timeout, etc.)
   - `promoted_at`, `demoted_at`: Timestamps for tier changes
   - `validation_context`: Optional text the monitor writes to tune Haiku validation prompts per-source
 - `search_queries`: Web search query logs (max 50 active, priority-based deactivation)
