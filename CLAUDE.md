@@ -285,7 +285,7 @@ Sources have two entry paths and a simple lifecycle:
 ```
 Web search finds URL → PROBATION (every event validated by Claude)
   → 5+ validated events with <50% pass rate → DEMOTED (never scraped again)
-  → 5 consecutive empty scrapes → DEMOTED
+  → 3 consecutive empty scrapes → DEMOTED
   → Monitor uses skip_source → DEMOTED
   → If source becomes active again → web search rediscovers it fresh
 ```
@@ -295,10 +295,14 @@ Web search finds URL → PROBATION (every event validated by Claude)
 **SCRAPE_ALL=1**: Environment variable bypasses the weekly schedule, scraping all config sources. Useful for debugging.
 
 **Key Functions in `sourceDiscovery.js`:**
-- `getProbationSources()`: Returns up to 10 non-config, non-demoted DB sources per run, ordered by `last_scraped ASC NULLS FIRST` (rotation — never-scraped sources go first, then longest-since-scraped)
+- `getProbationSources()`: Returns up to 10 non-config, non-demoted DB sources per run, productivity-weighted: never-scraped first → proven producers (validation_pass_count > 0) → fewer consecutive empties → oldest last_scraped as tiebreaker
+- `getKnownSourceUrls()`: Returns normalized URLs from both DB sources AND config sources, preventing config duplicates from entering probation. Multi-tenant-aware (adds base path slugs for platform URLs).
 - `updateSourceValidationStats()`: Tracks pass/fail counts, demotes at <50% after 5 events
-- `updateSourceStats()`: Tracks consecutive empty scrapes, demotes at 5
+- `updateSourceStats()`: Tracks consecutive empty scrapes, demotes at 3
+- `isSingleEventUrl()`: Filters individual event page URLs (not listing pages). Excludes Luma URLs — Luma slugs can't be distinguished by URL alone, so Claude evaluation handles them.
+- `isPaginationOrPastUrl()`: Filters pagination params, past-date URLs, hardcoded month paths
 - `isBroadSearchUrl()`: Filters garbage URLs (meetup.com/find/, eventbrite.com/d/, etc.)
+- `shouldSkipUrl()`: Filters non-event domains (social media, our own site, etc.)
 - `getEventSearchQueries()`: Returns query strings for direct event search (oldest `last_run` first for rotation)
 - `getActiveQueries()`: Returns queries for source discovery using exploration budget strategy
 
