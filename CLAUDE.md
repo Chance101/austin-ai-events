@@ -103,13 +103,14 @@ austin-ai-events/
 │   │   │   ├── websearch.js           # SerpAPI + event enrichment
 │   │   │   └── websearch.test.js      # URL matching tests
 │   │   ├── utils/
-│   │   │   ├── claude.js              # Claude API calls (validation, classification)
+│   │   │   ├── claude.js              # Claude API calls (validation, classification, content verification)
 │   │   │   ├── dedup.js               # Fuzzy matching + duplicate detection
 │   │   │   ├── dedup.test.js          # Dedup unit tests
 │   │   │   ├── decisionLog.js         # In-memory pipeline decision capture
 │   │   │   ├── errors.js              # Scraper error classification (transient/structural/permanent)
 │   │   │   ├── filters.js             # Austin location check + malformed title detection
 │   │   │   ├── filters.test.js        # Filter unit tests
+│   │   │   ├── scrapeDiagnostics.js   # Shared scraper diagnostic helpers (content signals, text snippets)
 │   │   │   └── supabase.js            # Database operations
 │   │   ├── monitor.js                 # Self-monitoring agent (health reports + auto-fix)
 │   │   ├── discovery/
@@ -230,8 +231,9 @@ import { config } from '../config.js';
    - Low-update sources (AICamp, Meetup groups, UT Austin, Austin Forum): 1x/week (Thu)
    - Schedule configured via `scrapeDays` in `config.js` (0=Sun through 6=Sat)
    - DB-discovered sources (trusted/probation) still scraped every run
-   - Per-source event counts are tracked and logged to `agent_runs.source_results`
-   - Sources returning 0 events trigger a console warning for silent failure detection
+   - Per-source results with diagnostics logged to `agent_runs.source_results` (JSONB)
+   - Diagnostics include: HTTP status, page size, parse strategy, candidate elements, content signals
+   - Content verification (Haiku) confirms parser breakage for config sources with suspicious diagnostics
 2. **Pre-validation checks** (no Claude API cost):
    - `isMalformedTitle()`: Rejects CSS, HTML, code in titles
    - `checkAustinLocation()`: Fast string-based Austin location check for ALL events
@@ -255,13 +257,38 @@ Scraper errors are classified in `utils/errors.js` into three categories:
 
 The scraper loop in `index.js` catches errors, classifies them, and retries transient failures once before logging.
 
-### Parse Failure Detection
-Scrapers return `ScrapeResult` envelopes (`utils/scrapeResult.js`) that distinguish "genuinely empty" from "couldn't parse":
-- `ScrapeResult.success(events)`: Normal result — count toward demotion if empty
-- `ScrapeResult.parseUncertain()`: Got HTML but couldn't extract — skip demotion counter, track separately via `consecutive_parse_failures`
-- After 3 consecutive parse failures, escalates to `human_action_items` for the outer loop to fix
+### Scraper Diagnostics & Self-Healing
+Every scraper returns `ScrapeResult` envelopes with diagnostic data (`utils/scrapeResult.js` + `utils/scrapeDiagnostics.js`):
 
-Backward compatible: scrapers returning bare arrays are wrapped via `ScrapeResult.from()`.
+**ScrapeResult statuses:**
+- `ScrapeResult.success(events, diagnostics)`: Events extracted successfully
+- `ScrapeResult.parseUncertain(diagnostics)`: Got HTML but couldn't extract — skip demotion, track via `consecutive_parse_failures`
+- `ScrapeResult.fetchFailed(diagnostics)`: HTTP error — skip demotion, don't count as empty
+
+**Diagnostics object** (carried by every ScrapeResult):
+- `httpStatus`, `pageSize`: Was the page reachable? Did it have content?
+- `parseAttempts[]`, `parseStrategy`: Which parsing paths were tried, which succeeded?
+- `candidateElements`, `eventsPreFilter`: How many items found before filtering?
+- `contentSignals`: Zero-cost string matching — `hasJsonLd`, `hasNextData`, `hasEventKeywords`, `hasDatePatterns`
+- `errors[]`: Parse errors that would otherwise be swallowed by catch blocks
+- `pageTextSnippet`: First ~3000 chars of page text (only when 0 events, for content verification)
+- `contentVerification`: Haiku ground-truth check result when triggered
+
+**Diagnostic-aware demotion** (`sourceDiscovery.js`):
+- `fetch_failed` → don't count toward demotion (source not proven dead)
+- `contentSignals.hasEventKeywords + 0 events` → treat as parse failure (parser broken, not empty source)
+- Only genuinely empty pages (no event keywords, HTTP 200) count toward the 3-strike demotion
+
+**Content verification** (Phase 2 — ground truth):
+- Triggered when: config source + HTTP 200 + pageSize > 5KB + hasEventKeywords + 1+ consecutive failures
+- Sends page text to Haiku: "does this page have event listings?"
+- Confirmed parser breakage logged to decision log with critical severity
+
+**Shared failure detection:**
+- `scraperTypeFailures` metric groups zero-event sources by scraper type
+- Monitor detects "all generic.js sources failed" as one shared bug, not separate issues
+
+Backward compatible: scrapers returning bare arrays are wrapped via `ScrapeResult.from()` (diagnostics will be null).
 
 ### Shared __NEXT_DATA__ Parser
 `utils/nextdata.js` provides `extractEventsFromNextData($)` — a shared fallback for pages that use Next.js server-rendered data instead of JSON-LD. Handles Luma city pages, Meetup Apollo state, and generic Next.js patterns with a recursive deep walk (depth limit 8). Used by `fetchEventDetails` (websearch), `scrapeGeneric` (probation sources). Chain: JSON-LD → __NEXT_DATA__ → CSS selectors.
@@ -416,12 +443,24 @@ The outer loop is a Claude Code scheduled task that runs daily, 2 hours after th
 1. Query `human_action_items` for highest-severity unresolved item where `auto_fixable = true` and `repair_status = 'pending'`
 2. Check staleness: query current metrics to see if the issue still exists. If resolved, mark as stale and stop.
 3. Check scope: are the `affected_files` within Safe or Moderate tiers? If Restricted or Never, skip.
-4. Make the fix, respecting the tier rules above
-5. Run `cd agent && npm test` — if tests fail, do not push, log failure to `repair_log`
-6. If tests pass: commit with descriptive message, push to main
-7. Log to `repair_log`: action_item_id, commit_hash, files_changed, change_summary, test_result
-8. Update action item: `repair_status = 'attempted'`, `attempt_count += 1`, `repair_commit = <hash>`
-9. One fix per run. Stop after handling one item.
+4. **INVESTIGATE before fixing** (mandatory for scraper issues):
+   a. Read the affected scraper code to understand the current parsing logic
+   b. Fetch the source URL directly — examine HTTP status, content type, and page structure
+   c. Look at the actual HTML: does it have JSON-LD? `__NEXT_DATA__`? What selectors would match?
+   d. Compare what the page provides vs. what the scraper expects
+   e. Form a specific diagnosis before writing any code (e.g., "JSON-LD now uses ItemList wrapper, parser only checks top-level @type")
+   f. If the action item includes diagnostic data (httpStatus, contentSignals, errors), use it as starting context
+5. Make the fix, respecting the tier rules above
+6. **VERIFY the fix** (mandatory): Run the specific scraper against the live URL to confirm it returns events:
+   ```bash
+   cd agent && node -e "import('./src/sources/SCRAPER.js').then(m => m.FUNCTION({id:'test',name:'test',url:'SOURCE_URL',type:'TYPE'}).then(r => console.log(JSON.stringify({events: r.events?.length ?? r.length, status: r.status}))))"
+   ```
+   If the scraper still returns 0 events, the fix did not work — do NOT commit. Log the failure and stop.
+7. Run `cd agent && npm test` — if tests fail, do not push, log failure to `repair_log`
+8. If tests pass: commit with descriptive message, push to main
+9. Log to `repair_log`: action_item_id, commit_hash, files_changed, change_summary, test_result (include the investigation diagnosis)
+10. Update action item: `repair_status = 'attempted'`, `attempt_count += 1`, `repair_commit = <hash>`
+11. One fix per run. Stop after handling one item.
 
 ### Safety Rails
 - **Oscillation protection:** If `attempt_count >= 3` and `repair_status = 'failed'`, freeze the item and create a GitHub issue

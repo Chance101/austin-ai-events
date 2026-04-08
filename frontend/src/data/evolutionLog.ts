@@ -14,6 +14,15 @@ export interface StewardshipEntry {
 
 export const stewardshipLog: StewardshipEntry[] = [
   {
+    id: 'scraper-diagnostics-self-healing',
+    date: '2026-04-07',
+    title: 'Scraper Diagnostics & Self-Healing Foundation',
+    problem: 'The monitor and outer loop were architecturally blind. Scrapers returned bare event counts with no diagnostic context — the monitor saw {events: 0} but couldn\'t distinguish "page blocked (403)" from "parser broken" from "source genuinely empty." This led to misdiagnosis: the monitor graded itself A while scrapers were silently failing, and the outer loop acted on symptoms (demoting live sources) instead of investigating root causes. Every significant fix in the prior session was found by the human, not the system.',
+    action: 'Seven-phase system overhaul: (1) Scraper diagnostics — every scraper now reports HTTP status, page size, parse strategy, candidate elements, and zero-cost content signals. (2) Content verification — Haiku ground-truth check when config sources show suspicious diagnostics (HTTP 200 + event keywords + 0 events). (3) Monitor diagnostic awareness — Opus now sees diagnostic data and follows diagnostic reasoning guidelines. (4) Shared failure detection — scraperTypeFailures metric detects "all generic.js sources failed" as one bug. (5) Diagnostic-aware demotion — pages with event keywords + 0 events treated as parser failure, not empty source (prevents false demotions during the repair window). (6) Multi-tenant code guardrail — skip_source blocked when reason mentions "covered" for multi-tenant platforms. (7) Investigation-first outer loop — must fetch URL, read HTML, diagnose before fixing, then verify the fix works before committing.',
+    result: 'The system can now observe what scrapers see (not just what they extract), detect parser breakage vs. genuine emptiness, prevent false demotions while repairs are in progress, and guide the outer loop with specific diagnoses instead of vague symptoms. The self-healing loop — detect anomaly, investigate, diagnose, fix, verify — is now structurally possible without human intervention.',
+    category: 'capability',
+  },
+  {
     id: 'source-discovery-overhaul',
     date: '2026-04-07',
     title: 'Source Discovery Overhaul + Multi-Tenant Platform Awareness',
