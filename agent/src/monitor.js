@@ -224,7 +224,6 @@ async function gatherMetrics(pipelineData = {}) {
     runsLast7Days: last7Runs.length,
     lastRun: recentRuns[0] || null,
     totalSources: sources.length,
-    activeSources: sources.filter(s => s.trust_tier !== 'demoted').length,
     scraperHealthRate,
     healthyScrapers,
     totalScrapersTracked: totalScrapers,
@@ -423,7 +422,7 @@ ${JSON.stringify({
     runsLast7Days: metrics.runsLast7Days,
     lastRun: metrics.lastRun,
     totalSources: metrics.totalSources,
-    activeSources: metrics.activeSources,
+    activeSources: metrics.totalSources,
     scraperHealthRate: metrics.scraperHealthRate,
     healthyScrapers: metrics.healthyScrapers,
     totalScrapersTracked: metrics.totalScrapersTracked,
@@ -917,7 +916,7 @@ export async function runMonitor(agentRunId = null, pipelineData = {}) {
   console.log('  Gathering metrics...');
   const metrics = await gatherMetrics(pipelineData);
   console.log(`  Calendar: ${metrics.upcomingEventCount21} events in 21d (${metrics.emptyDays21.length} empty), ${metrics.upcomingEventCount} in 30d (${metrics.emptyDays.length} empty)`);
-  console.log(`  Sources: ${metrics.activeSources} active, ${metrics.sourcesWithIssues.length} with issues`);
+  console.log(`  Sources: ${metrics.totalSources} active, ${metrics.sourcesWithIssues.length} with issues`);
   console.log(`  Last 7 days: ${metrics.runsLast7Days} runs, ${metrics.recentEventsAdded} events added`);
   if (metrics.recentReports.length > 0) {
     console.log(`  Memory: ${metrics.recentReports.length} recent reports, ${metrics.previousActionOutcomes.length} action outcomes tracked`);
