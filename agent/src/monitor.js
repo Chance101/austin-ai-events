@@ -422,7 +422,6 @@ ${JSON.stringify({
     runsLast7Days: metrics.runsLast7Days,
     lastRun: metrics.lastRun,
     totalSources: metrics.totalSources,
-    totalActiveSources: metrics.totalSources,
     scraperHealthRate: metrics.scraperHealthRate,
     healthyScrapers: metrics.healthyScrapers,
     totalScrapersTracked: metrics.totalScrapersTracked,
