@@ -1,4 +1,4 @@
-import { config } from '../config.js';
+import { config, isMultiTenantPlatform } from '../config.js';
 import { getClient } from '../utils/claude.js';
 import { getSupabase } from '../utils/supabase.js';
 
@@ -151,7 +151,26 @@ export async function getKnownSourceUrls() {
     return new Set();
   }
 
-  return new Set((data || []).map(s => normalizeUrl(s.url)));
+  const urls = new Set((data || []).map(s => normalizeUrl(s.url)));
+
+  // Also include config source URLs — prevents DB duplicates of hardcoded sources.
+  // For multi-tenant platforms, also add the base path so variants are caught
+  // (e.g., meetup.com/group matches meetup.com/group/events/)
+  for (const source of config.sources) {
+    urls.add(normalizeUrl(source.url));
+    // For platform URLs, add the base slug so path variants are caught
+    if (isMultiTenantPlatform(source.url)) {
+      try {
+        const parsed = new URL(source.url);
+        const basePath = parsed.pathname.split('/').filter(Boolean)[0];
+        if (basePath) {
+          urls.add(parsed.hostname.replace(/^www\./, '') + '/' + basePath);
+        }
+      } catch { /* ignore */ }
+    }
+  }
+
+  return urls;
 }
 
 /**
@@ -160,8 +179,8 @@ export async function getKnownSourceUrls() {
 function normalizeUrl(url) {
   try {
     const parsed = new URL(url);
-    // Remove trailing slashes, www prefix, and query params for comparison
-    return parsed.hostname.replace(/^www\./, '') + parsed.pathname.replace(/\/$/, '');
+    // Remove trailing slashes, www prefix, query params, and lowercase for comparison
+    return (parsed.hostname.replace(/^www\./, '') + parsed.pathname.replace(/\/$/, '')).toLowerCase();
   } catch {
     return url.toLowerCase();
   }
@@ -446,6 +465,12 @@ export async function discoverSources(runStats = null) {
         continue;
       }
 
+      // Skip pagination and past-date URLs
+      if (isPaginationOrPastUrl(result.url)) {
+        console.log(`    ⏭️  Skipping pagination/past URL: ${result.url.substring(0, 60)}...`);
+        continue;
+      }
+
       stats.urlsEvaluated++;
       console.log(`    🔎 Evaluating: ${result.url.substring(0, 60)}...`);
 
@@ -516,8 +541,11 @@ export async function discoverSources(runStats = null) {
 }
 
 /**
- * Check if URL is a single event page (not a listing page)
- * We want listing pages that show multiple events, not individual event pages
+ * Check if URL is a single event page (not a listing page).
+ * We want listing pages that show multiple events, not individual event pages.
+ * NOTE: Luma/lu.ma URLs are excluded here — they can't be distinguished by URL
+ * alone (lu.ma/org-calendar and lu.ma/event-slug look identical). Luma URLs
+ * are classified by the Claude evaluation step instead.
  */
 function isSingleEventUrl(url) {
   const patterns = [
@@ -525,9 +553,13 @@ function isSingleEventUrl(url) {
     /\/events\/[^\/]+\/?$/,             // /events/something (single event with slug)
     /eventbrite\.com\/e\//,             // Eventbrite single event
     /meetup\.com\/[^\/]+\/events\/\d+/, // Meetup single event
-    /lu\.ma\/[a-zA-Z0-9-]+$/,           // Lu.ma single event (but not /lu.ma/calendar/...)
     /\/event-details\//,                // Common single event pattern
+    /\/eventdetails\//,                 // AICamp-style event detail pages
     /\/event\?id=/,                     // Query param event ID
+    /\/events\/\d{4}-\d{2}-\d{2}\//,    // Date-path events (e.g., /events/2025-11-05/...)
+    /\/news\/\d{4}\//,                  // News/article pages with year paths
+    /\/e\/[a-zA-Z0-9-]{20,}/,          // Tixtree/Eventbrite-style long slug single events
+    /\/robot-competitions\//,           // RobotEvents individual competition pages
   ];
   return patterns.some(p => p.test(url));
 }
@@ -576,10 +608,27 @@ function shouldSkipUrl(url) {
     'news.google.com',
     'podcasts.apple.com',
     'spotify.com',
+    'instagram.com',
+    'austinai.events',         // Our own site
   ];
 
   const lowerUrl = url.toLowerCase();
   return skipPatterns.some(pattern => lowerUrl.includes(pattern));
+}
+
+/**
+ * Check if URL is a pagination or past-date URL that will never find future events
+ */
+function isPaginationOrPastUrl(url) {
+  const lowerUrl = url.toLowerCase();
+  return (
+    lowerUrl.includes('eventdisplay=past') ||
+    lowerUrl.includes('tribe-bar-date=') ||
+    /[?&]page=\d/i.test(url) ||
+    /\/page\/\d+\//i.test(url) ||
+    // Hardcoded month paths (e.g., /events/month/2026-04/)
+    /\/events\/month\/\d{4}-\d{2}/i.test(url)
+  );
 }
 
 /**
@@ -612,12 +661,14 @@ export async function getTrustedSources() {
 }
 
 /**
- * Get DB-discovered sources eligible for scraping
- * Returns all non-config, non-demoted sources, limited to 10 per run.
- * Ordered by last_scraped (NULLS FIRST) so never-scraped sources get
- * evaluated quickly, then by trust_score as tiebreaker. This ensures
- * rotation through all probation sources rather than always picking
- * the same high-scored ones.
+ * Get DB-discovered sources eligible for scraping.
+ * Returns up to 10 non-config, non-demoted sources per run.
+ *
+ * Priority order (productivity-weighted, not blind rotation):
+ *   1. Never-scraped sources first — new discoveries get evaluated quickly
+ *   2. Proven producers (validation_pass_count > 0) — sources that found events get priority
+ *   3. Fewer consecutive empty scrapes — deprioritize serial empties
+ *   4. last_scraped ASC as tiebreaker — rotation within tiers
  */
 export async function getProbationSources() {
   const { data, error } = await supabase
@@ -625,15 +676,41 @@ export async function getProbationSources() {
     .select('*')
     .in('trust_tier', ['probation', 'trusted'])
     .order('last_scraped', { ascending: true, nullsFirst: true })
-    .order('trust_score', { ascending: false })
-    .limit(10);
+    .limit(40);  // Fetch more than we need so we can sort in JS
 
   if (error) {
     console.error('Error fetching probation sources:', error.message);
     return [];
   }
 
-  return data || [];
+  if (!data || data.length === 0) return [];
+
+  // Productivity-weighted sort
+  const sorted = data.sort((a, b) => {
+    // Never-scraped sources always go first
+    const aNew = !a.last_scraped;
+    const bNew = !b.last_scraped;
+    if (aNew && !bNew) return -1;
+    if (!aNew && bNew) return 1;
+
+    // Proven producers (has validated events) before unproven
+    const aProven = (a.validation_pass_count || 0) > 0;
+    const bProven = (b.validation_pass_count || 0) > 0;
+    if (aProven && !bProven) return -1;
+    if (!aProven && bProven) return 1;
+
+    // Fewer consecutive empties = higher priority
+    const aEmpties = a.consecutive_empty_scrapes || 0;
+    const bEmpties = b.consecutive_empty_scrapes || 0;
+    if (aEmpties !== bEmpties) return aEmpties - bEmpties;
+
+    // Tiebreaker: oldest last_scraped first (rotation)
+    const aTime = a.last_scraped ? new Date(a.last_scraped).getTime() : 0;
+    const bTime = b.last_scraped ? new Date(b.last_scraped).getTime() : 0;
+    return aTime - bTime;
+  });
+
+  return sorted.slice(0, 10);
 }
 
 /**
@@ -686,12 +763,12 @@ export async function updateSourceStats(sourceUrl, eventsFound, status = 'succes
     // Genuinely empty — count toward demotion
     updates.consecutive_empty_scrapes = (source?.consecutive_empty_scrapes || 0) + 1;
 
-    // Demote after 5 consecutive empty scrapes (config sources get auto-skipped instead)
-    if (updates.consecutive_empty_scrapes >= 5 && source?.trust_tier !== 'config') {
+    // Demote after 3 consecutive empty scrapes (config sources get auto-skipped instead)
+    if (updates.consecutive_empty_scrapes >= 3 && source?.trust_tier !== 'config') {
       updates.trust_tier = 'demoted';
       updates.is_trusted = false;
       updates.demoted_at = new Date().toISOString();
-      console.log(`    ⬇️ Demoted source (5 empty scrapes): ${source?.name || sourceUrl}`);
+      console.log(`    ⬇️ Demoted source (3 empty scrapes): ${source?.name || sourceUrl}`);
     }
   }
 
