@@ -14,6 +14,15 @@ export interface StewardshipEntry {
 
 export const stewardshipLog: StewardshipEntry[] = [
   {
+    id: 'source-discovery-overhaul',
+    date: '2026-04-07',
+    title: 'Source Discovery Overhaul + Multi-Tenant Platform Awareness',
+    problem: 'The outer loop incorrectly demoted AI Tinkerers sources because it confused luma.com/aitx (AITX calendar) with luma.com/ai-tinkerers (separate org) — assuming same domain = same source. Investigation revealed three compounding issues: (1) the generic scraper identified itself as a bot ("AustinAIEventsBot/1.0"), causing 403s on every probation source with bot protection, (2) JSON-LD parsing missed ItemList > ListItem > Event nesting used by sites like aitinkerers.org, and (3) source discovery had no quality filters — 74 probation sources had accumulated, 50%+ were junk (config duplicates, individual past event pages, pagination URLs, Instagram profiles, our own site). The monitor gave the system an A while all of this was silently broken.',
+    action: 'Four layers of fixes: (1) Multi-tenant platform awareness — shared PLATFORM_DOMAINS constant and isMultiTenantPlatform() check used by monitor skip_source guardrail, feedback pipeline, and CLAUDE.md outer loop constraints. Outer loop prohibited from modifying sources.trust_tier via direct SQL. (2) Generic scraper — browser-like User-Agent replacing bot identifier, plus JSON-LD ItemList/SocialEvent parsing. (3) Source discovery overhaul — config source dedup, strengthened single-event-page detection, pagination/past-date URL filtering, productivity-weighted rotation replacing blind oldest-first, demotion threshold reduced 5 to 3 empty scrapes. (4) Monitor cleanup — excluded demoted sources from metrics to stop polluting Opus context. Cleaned 41 junk sources, reset 33 survivors to zero.',
+    result: 'Probation sources reduced from 74 to 33 legitimate listing pages. AI Tinkerers and luma.com/austin now scrape successfully (verified). Productive sources get priority over serial empties. The system can no longer confuse different organizers on the same platform. Multiple layers prevent junk from re-accumulating.',
+    category: 'optimization',
+  },
+  {
     id: 'nextdata-parser-parse-failure',
     date: '2026-04-04',
     title: 'Shared __NEXT_DATA__ Parser + Parse Failure Detection',
