@@ -33,10 +33,11 @@ async function gatherMetrics(pipelineData = {}) {
       .order('started_at', { ascending: false })
       .limit(30),
 
-    // All sources
+    // Active sources (exclude demoted — they pollute metrics and Opus context)
     supabase
       .from('sources')
       .select('*')
+      .neq('trust_tier', 'demoted')
       .order('created_at', { ascending: false }),
 
     // Upcoming events (on the calendar right now)
