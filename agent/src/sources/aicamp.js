@@ -1,5 +1,7 @@
 import * as cheerio from 'cheerio';
 import { decodeHtmlEntities } from '../utils/html.js';
+import { ScrapeResult } from '../utils/scrapeResult.js';
+import { createDiagnostics, createFetchDiagnostics, extractTextSnippet } from '../utils/scrapeDiagnostics.js';
 
 /**
  * Scrape Austin AI events from AICamp
@@ -7,6 +9,8 @@ import { decodeHtmlEntities } from '../utils/html.js';
  */
 export async function scrapeAICamp(sourceConfig) {
   const events = [];
+  const diag = createDiagnostics();
+  let rawHtml = null;
 
   try {
     const response = await fetch(sourceConfig.url, {
@@ -15,12 +19,19 @@ export async function scrapeAICamp(sourceConfig) {
       },
     });
 
+    diag.httpStatus = response.status;
+
     if (!response.ok) {
       console.error(`    Failed to fetch ${sourceConfig.url}: ${response.status}`);
-      return events;
+      diag.errors.push({ stage: 'fetch', message: `HTTP ${response.status}` });
+      return ScrapeResult.fetchFailed(diag);
     }
 
     const html = await response.text();
+    rawHtml = html;
+    diag.pageSize = html.length;
+    Object.assign(diag, createFetchDiagnostics(response, html));
+    diag.parseAttempts.push('css-selectors');
     const $ = cheerio.load(html);
 
     // Parse event cards — each is a .single-popular-carusel div
@@ -105,6 +116,7 @@ export async function scrapeAICamp(sourceConfig) {
       });
     });
 
+    diag.candidateElements = eventCards.length;
     console.log(`    Found ${eventCards.length} Austin events on AICamp listing`);
 
     // Build events, fetching detail pages for richer data (with rate limiting)
@@ -161,17 +173,27 @@ export async function scrapeAICamp(sourceConfig) {
 
   } catch (error) {
     console.error(`    Error scraping AICamp:`, error.message);
+    diag.errors.push({ stage: 'fetch', message: error.message });
   }
 
   // Filter to future events only
   const now = new Date();
-  return events.filter(e => {
+  const upcoming = events.filter(e => {
     if (e.start_time) {
       const eventDate = new Date(e.start_time);
       if (!isNaN(eventDate) && eventDate < now) return false;
     }
     return true;
   });
+
+  diag.eventsPreFilter = events.length;
+  diag.parseStrategy = upcoming.length > 0 ? 'css-selectors' : null;
+
+  if (upcoming.length === 0 && rawHtml) {
+    diag.pageTextSnippet = extractTextSnippet(rawHtml);
+    return ScrapeResult.parseUncertain(diag);
+  }
+  return ScrapeResult.success(upcoming, diag);
 }
 
 /**

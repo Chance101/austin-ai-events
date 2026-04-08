@@ -1,6 +1,7 @@
 import * as cheerio from 'cheerio';
 import { decodeHtmlEntities } from '../utils/html.js';
 import { ScrapeResult } from '../utils/scrapeResult.js';
+import { createDiagnostics, createFetchDiagnostics, extractTextSnippet } from '../utils/scrapeDiagnostics.js';
 
 /**
  * Scrape events from a Lu.ma calendar page
@@ -8,6 +9,8 @@ import { ScrapeResult } from '../utils/scrapeResult.js';
  */
 export async function scrapeLuma(sourceConfig) {
   const events = [];
+  const diag = createDiagnostics();
+  let rawHtml = null;
 
   try {
     const response = await fetch(sourceConfig.url, {
@@ -19,21 +22,30 @@ export async function scrapeLuma(sourceConfig) {
       redirect: 'follow',
     });
 
+    diag.httpStatus = response.status;
+
     if (!response.ok) {
       console.error(`    Failed to fetch ${sourceConfig.url}: ${response.status}`);
-      return ScrapeResult.fetchFailed();
+      diag.errors.push({ stage: 'fetch', message: `HTTP ${response.status}` });
+      return ScrapeResult.fetchFailed(diag);
     }
 
     const html = await response.text();
+    rawHtml = html;
+    diag.pageSize = html.length;
     const $ = cheerio.load(html);
+    Object.assign(diag, createFetchDiagnostics(response, html));
 
     // Find JSON-LD script tags
+    diag.parseAttempts.push('json-ld');
+    let jsonLdCandidates = 0;
     $('script[type="application/ld+json"]').each((_, script) => {
       try {
         const data = JSON.parse($(script).html());
 
         // Check if this is an Organization with events
         if (data['@type'] === 'Organization' && Array.isArray(data.events)) {
+          jsonLdCandidates += data.events.length;
           for (const event of data.events) {
             if (event['@type'] !== 'Event') continue;
 
@@ -90,12 +102,15 @@ export async function scrapeLuma(sourceConfig) {
           }
         }
       } catch (e) {
-        // JSON parse error, skip this script tag
+        diag.errors.push({ stage: 'parse', message: `JSON-LD parse error: ${e.message}` });
       }
     });
+    if (events.length > 0) diag.parseStrategy = 'json-ld';
+    diag.candidateElements = jsonLdCandidates;
 
     // Fallback: Parse Next.js pageProps data (used on city/discover pages like luma.com/austin)
     if (events.length === 0) {
+      diag.parseAttempts.push('nextdata-luma');
       $('script').each((_, script) => {
         try {
           const text = $(script).html();
@@ -152,17 +167,26 @@ export async function scrapeLuma(sourceConfig) {
             });
           }
         } catch (e) {
-          // Parse error, skip
+          diag.errors.push({ stage: 'parse', message: `Next.js parse error: ${e.message}` });
         }
       });
+      if (events.length > 0) diag.parseStrategy = 'nextdata-luma';
     }
 
   } catch (error) {
     console.error(`    Error scraping Lu.ma ${sourceConfig.id}:`, error.message);
+    diag.errors.push({ stage: 'fetch', message: error.message });
+  }
+
+  diag.eventsPreFilter = events.length;
+
+  // Store text snippet when no events found (for content verification)
+  if (events.length === 0 && rawHtml) {
+    diag.pageTextSnippet = extractTextSnippet(rawHtml);
   }
 
   if (events.length === 0) {
-    return ScrapeResult.parseUncertain();
+    return ScrapeResult.parseUncertain(diag);
   }
-  return ScrapeResult.success(events);
+  return ScrapeResult.success(events, diag);
 }

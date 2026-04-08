@@ -1,6 +1,8 @@
 import * as cheerio from 'cheerio';
 import { fromZonedTime } from 'date-fns-tz';
 import { decodeHtmlEntities } from '../utils/html.js';
+import { ScrapeResult } from '../utils/scrapeResult.js';
+import { createDiagnostics, createFetchDiagnostics, extractTextSnippet } from '../utils/scrapeDiagnostics.js';
 
 const AUSTIN_TIMEZONE = 'America/Chicago';
 
@@ -35,6 +37,8 @@ function createAustinDate(year, month, day, hour = 9) {
  */
 export async function scrapeLeadersInAI(sourceConfig) {
   const events = [];
+  const diag = createDiagnostics();
+  let rawHtml = null;
 
   try {
     const response = await fetch(sourceConfig.url, {
@@ -43,12 +47,18 @@ export async function scrapeLeadersInAI(sourceConfig) {
       },
     });
 
+    diag.httpStatus = response.status;
+
     if (!response.ok) {
       console.error(`    Failed to fetch ${sourceConfig.url}: ${response.status}`);
-      return events;
+      diag.errors.push({ stage: 'fetch', message: `HTTP ${response.status}` });
+      return ScrapeResult.fetchFailed(diag);
     }
 
     const html = await response.text();
+    rawHtml = html;
+    diag.pageSize = html.length;
+    Object.assign(diag, createFetchDiagnostics(response, html));
     const $ = cheerio.load(html);
 
     // Diagnostic logging
@@ -56,6 +66,7 @@ export async function scrapeLeadersInAI(sourceConfig) {
     console.log(`    [diag] Found ${jsonLdScripts} JSON-LD scripts on page`);
 
     // Check for JSON-LD
+    diag.parseAttempts.push('json-ld');
     $('script[type="application/ld+json"]').each((_, script) => {
       try {
         const data = JSON.parse($(script).html());
@@ -84,8 +95,13 @@ export async function scrapeLeadersInAI(sourceConfig) {
       }
     });
 
+    if (events.length > 0) {
+      diag.parseStrategy = 'json-ld';
+    }
+
     // If no JSON-LD, parse from page content
     if (events.length === 0) {
+      diag.parseAttempts.push('text-parsing');
       // Look for date patterns in page text
       const pageText = $('body').text();
 
@@ -137,12 +153,22 @@ export async function scrapeLeadersInAI(sourceConfig) {
           });
         }
       }
+      if (events.length > 0) {
+        diag.parseStrategy = 'text-parsing';
+      }
       // Removed hardcoded fallback - rely on page scraping or JSON-LD only
     }
 
   } catch (error) {
     console.error(`    Error scraping Leaders in AI:`, error.message);
+    diag.errors.push({ stage: 'parse', message: error.message });
   }
 
-  return events;
+  diag.eventsPreFilter = events.length;
+
+  if (events.length === 0 && rawHtml) {
+    diag.pageTextSnippet = extractTextSnippet(rawHtml);
+    return ScrapeResult.parseUncertain(diag);
+  }
+  return ScrapeResult.success(events, diag);
 }

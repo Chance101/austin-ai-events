@@ -1,5 +1,7 @@
 import * as cheerio from 'cheerio';
 import { decodeHtmlEntities } from '../utils/html.js';
+import { ScrapeResult } from '../utils/scrapeResult.js';
+import { createDiagnostics, createFetchDiagnostics, extractTextSnippet } from '../utils/scrapeDiagnostics.js';
 
 /**
  * Scrape events from Austin Forum on Technology & Society
@@ -7,6 +9,8 @@ import { decodeHtmlEntities } from '../utils/html.js';
  */
 export async function scrapeAustinForum(sourceConfig) {
   const events = [];
+  const diag = createDiagnostics();
+  let rawHtml = null;
 
   try {
     const response = await fetch(sourceConfig.url, {
@@ -15,15 +19,22 @@ export async function scrapeAustinForum(sourceConfig) {
       },
     });
 
+    diag.httpStatus = response.status;
+
     if (!response.ok) {
       console.error(`    Failed to fetch ${sourceConfig.url}: ${response.status}`);
-      return events;
+      diag.errors.push({ stage: 'fetch', message: `HTTP ${response.status}` });
+      return ScrapeResult.fetchFailed(diag);
     }
 
     const html = await response.text();
+    rawHtml = html;
+    diag.pageSize = html.length;
+    Object.assign(diag, createFetchDiagnostics(response, html));
     const $ = cheerio.load(html);
 
     // Find Eventbrite links from the main listing page
+    diag.parseAttempts.push('eventbrite-links');
     const eventbriteLinks = new Set();
     $('a[href*="eventbrite.com/e/"]').each((_, el) => {
       const href = $(el).attr('href');
@@ -59,9 +70,11 @@ export async function scrapeAustinForum(sourceConfig) {
         await new Promise(resolve => setTimeout(resolve, 300));
       } catch (e) {
         // Detail page fetch failed, skip
+        diag.errors.push({ stage: 'detail-fetch', message: `${detailUrl}: ${e.message}` });
       }
     }
 
+    diag.candidateElements = eventbriteLinks.size;
     console.log(`    [diag] Found ${eventbriteLinks.size} Eventbrite links (${detailPages.size} detail pages checked), ${$('a').length} total links`);
 
     // For each unique Eventbrite link, try to fetch event details
@@ -112,6 +125,7 @@ export async function scrapeAustinForum(sourceConfig) {
             }
           } catch (e) {
             // JSON parse error
+            diag.errors.push({ stage: 'parse', message: `JSON-LD parse: ${e.message}` });
           }
         });
 
@@ -120,12 +134,20 @@ export async function scrapeAustinForum(sourceConfig) {
 
       } catch (e) {
         console.error(`    Error fetching ${eventUrl}:`, e.message);
+        diag.errors.push({ stage: 'event-fetch', message: `${eventUrl}: ${e.message}` });
       }
     }
 
   } catch (error) {
     console.error(`    Error scraping Austin Forum:`, error.message);
+    diag.errors.push({ stage: 'parse', message: error.message });
   }
 
-  return events;
+  diag.eventsPreFilter = events.length;
+
+  if (events.length === 0 && rawHtml) {
+    diag.pageTextSnippet = extractTextSnippet(rawHtml);
+    return ScrapeResult.parseUncertain(diag);
+  }
+  return ScrapeResult.success(events, diag);
 }

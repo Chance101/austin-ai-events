@@ -715,13 +715,19 @@ export async function getProbationSources() {
 
 /**
  * Update source statistics after scraping.
- * Tracks consecutive empty scrapes (demotes after 5) and
+ * Tracks consecutive empty scrapes (demotes after 3) and
  * consecutive parse failures (escalates after 3).
+ *
+ * Uses diagnostics to prevent false demotions:
+ * - fetch_failed: page unreachable — don't count as "empty source"
+ * - contentSignals.hasEventKeywords + 0 events: parser broken — treat like parse_uncertain
+ *
  * @param {string} sourceUrl
  * @param {number} eventsFound
- * @param {string} status - 'success' | 'parse_uncertain'
+ * @param {string} status - 'success' | 'parse_uncertain' | 'fetch_failed'
+ * @param {Object|null} diagnostics - scraper diagnostics (httpStatus, contentSignals, etc.)
  */
-export async function updateSourceStats(sourceUrl, eventsFound, status = 'success') {
+export async function updateSourceStats(sourceUrl, eventsFound, status = 'success', diagnostics = null) {
   // First get current source data
   const { data: source } = await supabase
     .from('sources')
@@ -735,22 +741,29 @@ export async function updateSourceStats(sourceUrl, eventsFound, status = 'succes
   };
 
   if (eventsFound > 0) {
-    // Events found — reset both counters
+    // Events found — reset all counters
     updates.consecutive_empty_scrapes = 0;
     updates.consecutive_parse_failures = 0;
+  } else if (status === 'fetch_failed') {
+    // HTTP failure — source may be alive but unreachable (bot blocking, rate limiting, down)
+    // Don't count as "empty source" — the source isn't proven dead, we just can't reach it
+    console.log(`    📊 Fetch failed (HTTP ${diagnostics?.httpStatus || 'unknown'}) — not counting toward demotion`);
   } else if (status === 'parse_uncertain') {
     // Got HTML but couldn't extract — don't count toward empty scrapes (not the source's fault)
     updates.consecutive_parse_failures = (source?.consecutive_parse_failures || 0) + 1;
 
-    // Escalate after 3 consecutive parse failures
+    // Escalate after 3 consecutive parse failures (include diagnostics for the outer loop)
     if (updates.consecutive_parse_failures >= 3) {
+      const diagContext = diagnostics
+        ? `\nDiagnostics: HTTP ${diagnostics.httpStatus}, ${diagnostics.pageSize} bytes, parseAttempts: [${diagnostics.parseAttempts?.join(', ')}], contentSignals: ${JSON.stringify(diagnostics.contentSignals)}`
+        : '';
       console.log(`    🔧 Parse failure escalation: ${source?.name || sourceUrl} (${updates.consecutive_parse_failures} consecutive)`);
       try {
         await supabase.from('human_action_items').insert({
           severity: 'warning',
           category: 'broken_scraper',
           title: `Parse failure: ${source?.name || sourceUrl} — HTML received but no events extracted (${updates.consecutive_parse_failures}x)`,
-          description: `Source at ${sourceUrl} is returning valid HTML but the scraper cannot extract events. The page structure may have changed or uses a format the scraper doesn't handle (e.g., client-side rendering, non-standard data format).`,
+          description: `Source at ${sourceUrl} is returning valid HTML but the scraper cannot extract events. The page structure may have changed or uses a format the scraper doesn't handle (e.g., client-side rendering, non-standard data format).${diagContext}`,
           action_type: 'code_change',
           affected_files: ['agent/src/sources/generic.js', 'agent/src/utils/nextdata.js'],
           auto_fixable: true,
@@ -759,11 +772,36 @@ export async function updateSourceStats(sourceUrl, eventsFound, status = 'succes
         console.error(`    Error creating parse failure action item: ${e.message}`);
       }
     }
+  } else if (diagnostics?.contentSignals?.hasEventKeywords && diagnostics?.httpStatus === 200) {
+    // Page has event content (keywords detected) but scraper returned 0 events with "success" status
+    // This is likely parser breakage, not an empty source — treat like parse_uncertain
+    console.log(`    📊 Content signals show events on page but scraper found 0 — treating as parse failure, not empty`);
+    updates.consecutive_parse_failures = (source?.consecutive_parse_failures || 0) + 1;
+
+    if (updates.consecutive_parse_failures >= 3) {
+      const diagContext = diagnostics
+        ? `\nDiagnostics: HTTP ${diagnostics.httpStatus}, ${diagnostics.pageSize} bytes, parseAttempts: [${diagnostics.parseAttempts?.join(', ')}], parseStrategy: ${diagnostics.parseStrategy}, candidateElements: ${diagnostics.candidateElements}, contentSignals: ${JSON.stringify(diagnostics.contentSignals)}`
+        : '';
+      console.log(`    🔧 Suspected parser breakage escalation: ${source?.name || sourceUrl} (content signals positive, ${updates.consecutive_parse_failures} consecutive)`);
+      try {
+        await supabase.from('human_action_items').insert({
+          severity: 'warning',
+          category: 'broken_scraper',
+          title: `Suspected parser breakage: ${source?.name || sourceUrl} — page has event content but scraper found 0 (${updates.consecutive_parse_failures}x)`,
+          description: `Source at ${sourceUrl} has event-related content (keywords detected in HTML) but the scraper reports success with 0 events. The parser may be silently missing events due to an unrecognized page structure.${diagContext}`,
+          action_type: 'code_change',
+          affected_files: ['agent/src/sources/generic.js', 'agent/src/utils/nextdata.js'],
+          auto_fixable: true,
+        });
+      } catch (e) {
+        console.error(`    Error creating parser breakage action item: ${e.message}`);
+      }
+    }
   } else {
-    // Genuinely empty — count toward demotion
+    // Genuinely empty — no event content detected on page, count toward demotion
     updates.consecutive_empty_scrapes = (source?.consecutive_empty_scrapes || 0) + 1;
 
-    // Demote after 3 consecutive empty scrapes (config sources get auto-skipped instead)
+    // Demote after 3 consecutive empty scrapes (config sources are protected)
     if (updates.consecutive_empty_scrapes >= 3 && source?.trust_tier !== 'config') {
       updates.trust_tier = 'demoted';
       updates.is_trusted = false;

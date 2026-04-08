@@ -1,6 +1,8 @@
 import * as cheerio from 'cheerio';
 import { fromZonedTime } from 'date-fns-tz';
 import { decodeHtmlEntities } from '../utils/html.js';
+import { ScrapeResult } from '../utils/scrapeResult.js';
+import { createDiagnostics, createFetchDiagnostics, extractTextSnippet } from '../utils/scrapeDiagnostics.js';
 
 const AUSTIN_TIMEZONE = 'America/Chicago';
 
@@ -26,6 +28,8 @@ const MONTH_MAP = {
  */
 export async function scrapeUTAustin(sourceConfig) {
   const events = [];
+  const diag = createDiagnostics();
+  let rawHtml = null;
 
   try {
     const response = await fetch(sourceConfig.url, {
@@ -34,15 +38,22 @@ export async function scrapeUTAustin(sourceConfig) {
       },
     });
 
+    diag.httpStatus = response.status;
+
     if (!response.ok) {
       console.error(`    Failed to fetch ${sourceConfig.url}: ${response.status}`);
-      return events;
+      diag.errors.push({ stage: 'fetch', message: `HTTP ${response.status}` });
+      return ScrapeResult.fetchFailed(diag);
     }
 
     const html = await response.text();
+    rawHtml = html;
+    diag.pageSize = html.length;
+    Object.assign(diag, createFetchDiagnostics(response, html));
     const $ = cheerio.load(html);
 
     // Try JSON-LD first (most reliable)
+    diag.parseAttempts.push('json-ld');
     $('script[type="application/ld+json"]').each((_, script) => {
       try {
         const data = JSON.parse($(script).html());
@@ -74,11 +85,15 @@ export async function scrapeUTAustin(sourceConfig) {
 
     if (events.length > 0) {
       console.log(`    Found ${events.length} events via JSON-LD`);
+      diag.parseStrategy = 'json-ld';
     }
 
     // Fallback: parse the HTML structure using .event-info containers
     if (events.length === 0) {
-      $('.event-info').each((_, el) => {
+      diag.parseAttempts.push('css-selectors');
+      const eventCards = $('.event-info');
+      diag.candidateElements = eventCards.length;
+      eventCards.each((_, el) => {
         try {
           const $info = $(el);
           const title = decodeHtmlEntities($info.find('h3.event-title').text().trim());
@@ -136,11 +151,18 @@ export async function scrapeUTAustin(sourceConfig) {
           // Parse error for this element
         }
       });
+
+      if (events.length > 0) {
+        diag.parseStrategy = 'css-selectors';
+      }
     }
 
   } catch (error) {
     console.error(`    Error scraping UT Austin AI:`, error.message);
+    diag.errors.push({ stage: 'parse', message: error.message });
   }
+
+  diag.eventsPreFilter = events.length;
 
   // Filter to future events only
   const now = new Date();
@@ -154,11 +176,17 @@ export async function scrapeUTAustin(sourceConfig) {
 
   // Dedupe by URL
   const seen = new Set();
-  return upcoming.filter(e => {
+  const deduped = upcoming.filter(e => {
     if (seen.has(e.url)) return false;
     seen.add(e.url);
     return true;
   });
+
+  if (deduped.length === 0 && rawHtml) {
+    diag.pageTextSnippet = extractTextSnippet(rawHtml);
+    return ScrapeResult.parseUncertain(diag);
+  }
+  return ScrapeResult.success(deduped, diag);
 }
 
 /**

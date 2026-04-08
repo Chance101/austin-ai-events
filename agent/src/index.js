@@ -230,11 +230,13 @@ async function discoverEvents() {
 
       let events = [];
       let scrapeStatus = 'success';
+      let scrapeDiagnostics = null;
       try {
         const rawResult = await scrapeSource(source);
         const result = ScrapeResult.from(rawResult);
         events = result.events;
         scrapeStatus = result.status;
+        scrapeDiagnostics = result.diagnostics;
       } catch (firstError) {
         const classified = classifyScrapeError(firstError, { source: source.name });
 
@@ -246,6 +248,7 @@ async function discoverEvents() {
             const retryResult = ScrapeResult.from(retryRaw);
             events = retryResult.events;
             scrapeStatus = retryResult.status;
+            scrapeDiagnostics = retryResult.diagnostics;
           } catch (retryError) {
             // Retry also failed — reclassify and throw to outer catch
             throw retryError;
@@ -260,17 +263,33 @@ async function discoverEvents() {
 
       // Track per-source results for observability
       if (!runStats.sourceResults) runStats.sourceResults = [];
-      runStats.sourceResults.push({ name: source.name, url: source.url, events: events.length });
+      runStats.sourceResults.push({
+        name: source.name,
+        url: source.url,
+        events: events.length,
+        scrapeStatus,
+        scraperType: source.type || 'unknown',
+        diagnostics: scrapeDiagnostics,
+      });
 
       if (events.length === 0) {
-        if (scrapeStatus === 'parse_uncertain') {
+        if (scrapeStatus === 'fetch_failed') {
+          console.warn(`    ⚠️  ${source.name} fetch failed (HTTP ${scrapeDiagnostics?.httpStatus || 'unknown'})`);
+          decisionLog.log({
+            event: source.name,
+            source: source.id || source.name,
+            stage: 'scrape',
+            outcome: 'error',
+            reason: `Fetch failed: HTTP ${scrapeDiagnostics?.httpStatus || 'unknown'}`,
+          });
+        } else if (scrapeStatus === 'parse_uncertain') {
           console.warn(`    ⚠️  ${source.name} returned 0 events (parse_uncertain — HTML received but couldn't extract)`);
           decisionLog.log({
             event: source.name,
             source: source.id || source.name,
             stage: 'scrape',
             outcome: 'parse_failure',
-            reason: 'HTML received but no events could be extracted — scraper may need updating',
+            reason: 'HTML received but no events could be extracted ��� scraper may need updating',
           });
         } else {
           console.warn(`    ⚠️  ${source.name} returned 0 events — may be silently failing`);
@@ -304,9 +323,9 @@ async function discoverEvents() {
       allDiscoveredEvents.push(...events);
       runStats.sourcesScraped++;
 
-      // Update source stats in DB
+      // Update source stats in DB (pass diagnostics for intelligent demotion decisions)
       if (source.fromDb || source.url) {
-        await updateSourceStats(source.url, events.length, scrapeStatus).catch(() => {});
+        await updateSourceStats(source.url, events.length, scrapeStatus, scrapeDiagnostics).catch(() => {});
       }
 
     } catch (error) {

@@ -1,5 +1,7 @@
 import * as cheerio from 'cheerio';
 import { decodeHtmlEntities } from '../utils/html.js';
+import { ScrapeResult } from '../utils/scrapeResult.js';
+import { createDiagnostics, createFetchDiagnostics, extractTextSnippet } from '../utils/scrapeDiagnostics.js';
 
 /**
  * Scrape events from a Meetup group's events page
@@ -7,6 +9,8 @@ import { decodeHtmlEntities } from '../utils/html.js';
  */
 export async function scrapeMeetup(sourceConfig) {
   const events = [];
+  const diag = createDiagnostics();
+  let rawHtml = null;
 
   try {
     const response = await fetch(sourceConfig.url, {
@@ -17,19 +21,28 @@ export async function scrapeMeetup(sourceConfig) {
       },
     });
 
+    diag.httpStatus = response.status;
+
     if (!response.ok) {
       console.error(`    Failed to fetch ${sourceConfig.url}: ${response.status}`);
-      return events;
+      diag.errors.push({ stage: 'fetch', message: `HTTP ${response.status}` });
+      return ScrapeResult.fetchFailed(diag);
     }
 
     const html = await response.text();
+    rawHtml = html;
+    diag.pageSize = html.length;
+    Object.assign(diag, createFetchDiagnostics(response, html));
     const $ = cheerio.load(html);
 
     // Extract __NEXT_DATA__ JSON
     const nextDataScript = $('script#__NEXT_DATA__').html();
     if (!nextDataScript) {
       console.error('    Could not find __NEXT_DATA__ script');
-      return events;
+      diag.parseAttempts.push('nextdata-apollo');
+      diag.errors.push({ stage: 'parse', message: 'No __NEXT_DATA__ script found' });
+      if (rawHtml) diag.pageTextSnippet = extractTextSnippet(rawHtml);
+      return ScrapeResult.parseUncertain(diag);
     }
 
     const nextData = JSON.parse(nextDataScript);
@@ -38,12 +51,17 @@ export async function scrapeMeetup(sourceConfig) {
     if (!apolloState) {
       console.error('    Could not find Apollo state in page data');
       console.log(`    [diag] __NEXT_DATA__ keys: ${Object.keys(nextData?.props?.pageProps || {}).join(', ')}`);
-      return events;
+      diag.parseAttempts.push('nextdata-apollo');
+      diag.errors.push({ stage: 'parse', message: 'No __APOLLO_STATE__ in __NEXT_DATA__' });
+      if (rawHtml) diag.pageTextSnippet = extractTextSnippet(rawHtml);
+      return ScrapeResult.parseUncertain(diag);
     }
 
     // Diagnostic: count Event keys in Apollo state
     const eventKeys = Object.keys(apolloState).filter(k => k.startsWith('Event:'));
     console.log(`    [diag] Apollo state has ${eventKeys.length} Event entries, ${Object.keys(apolloState).filter(k => k.startsWith('Venue:')).length} Venue entries`);
+    diag.parseAttempts.push('nextdata-apollo');
+    diag.candidateElements = eventKeys.length;
 
     // Extract the group name from Apollo state
     let groupName = sourceConfig.name; // fallback to config name
@@ -102,7 +120,14 @@ export async function scrapeMeetup(sourceConfig) {
 
   } catch (error) {
     console.error(`    Error scraping Meetup ${sourceConfig.id}:`, error.message);
+    diag.errors.push({ stage: 'fetch', message: error.message });
   }
 
-  return events;
+  diag.eventsPreFilter = events.length;
+  diag.parseStrategy = events.length > 0 ? 'nextdata-apollo' : null;
+  if (events.length === 0 && rawHtml) {
+    diag.pageTextSnippet = extractTextSnippet(rawHtml);
+    return ScrapeResult.parseUncertain(diag);
+  }
+  return ScrapeResult.success(events, diag);
 }

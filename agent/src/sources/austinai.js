@@ -1,5 +1,7 @@
 import * as cheerio from 'cheerio';
 import { decodeHtmlEntities } from '../utils/html.js';
+import { ScrapeResult } from '../utils/scrapeResult.js';
+import { createDiagnostics, createFetchDiagnostics, extractTextSnippet } from '../utils/scrapeDiagnostics.js';
 
 /**
  * Scrape events from Austin AI Alliance
@@ -7,6 +9,8 @@ import { decodeHtmlEntities } from '../utils/html.js';
  */
 export async function scrapeAustinAI(sourceConfig) {
   const events = [];
+  const diag = createDiagnostics();
+  let rawHtml = null;
 
   try {
     // First, get the list of event URLs from the events page
@@ -16,15 +20,22 @@ export async function scrapeAustinAI(sourceConfig) {
       },
     });
 
+    diag.httpStatus = listResponse.status;
+
     if (!listResponse.ok) {
       console.error(`    Failed to fetch ${sourceConfig.url}: ${listResponse.status}`);
-      return events;
+      diag.errors.push({ stage: 'fetch', message: `HTTP ${listResponse.status}` });
+      return ScrapeResult.fetchFailed(diag);
     }
 
     const listHtml = await listResponse.text();
+    rawHtml = listHtml;
+    diag.pageSize = listHtml.length;
+    Object.assign(diag, createFetchDiagnostics(listResponse, listHtml));
     const $list = cheerio.load(listHtml);
 
     // Extract event URLs from JSON-LD ItemList
+    diag.parseAttempts.push('json-ld-itemlist');
     const eventUrls = [];
     $list('script[type="application/ld+json"]').each((_, script) => {
       try {
@@ -41,8 +52,10 @@ export async function scrapeAustinAI(sourceConfig) {
         }
       } catch (e) {
         // JSON parse error
+        diag.errors.push({ stage: 'parse', message: `JSON-LD parse: ${e.message}` });
       }
     });
+    diag.candidateElements = eventUrls.length;
 
     // Fetch each event page
     for (const eventUrl of eventUrls) {
@@ -178,12 +191,20 @@ export async function scrapeAustinAI(sourceConfig) {
 
       } catch (e) {
         console.error(`    Error fetching ${eventUrl}:`, e.message);
+        diag.errors.push({ stage: 'detail-fetch', message: `${eventUrl}: ${e.message}` });
       }
     }
 
   } catch (error) {
     console.error(`    Error scraping Austin AI Alliance:`, error.message);
+    diag.errors.push({ stage: 'parse', message: error.message });
   }
 
-  return events;
+  diag.eventsPreFilter = events.length;
+
+  if (events.length === 0 && rawHtml) {
+    diag.pageTextSnippet = extractTextSnippet(rawHtml);
+    return ScrapeResult.parseUncertain(diag);
+  }
+  return ScrapeResult.success(events, diag);
 }

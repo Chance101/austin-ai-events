@@ -2,6 +2,7 @@ import * as cheerio from 'cheerio';
 import { decodeHtmlEntities } from '../utils/html.js';
 import { extractEventsFromNextData } from '../utils/nextdata.js';
 import { ScrapeResult } from '../utils/scrapeResult.js';
+import { createDiagnostics, createFetchDiagnostics, extractTextSnippet } from '../utils/scrapeDiagnostics.js';
 
 /**
  * Generic scraper for websites with event listings
@@ -9,6 +10,8 @@ import { ScrapeResult } from '../utils/scrapeResult.js';
  */
 export async function scrapeGeneric(sourceConfig) {
   const events = [];
+  const diag = createDiagnostics();
+  let rawHtml = null;
 
   try {
     const response = await fetch(sourceConfig.url, {
@@ -17,15 +20,23 @@ export async function scrapeGeneric(sourceConfig) {
       },
     });
 
+    diag.httpStatus = response.status;
+
     if (!response.ok) {
       console.error(`Failed to fetch ${sourceConfig.url}: ${response.status}`);
-      return ScrapeResult.fetchFailed();
+      diag.errors.push({ stage: 'fetch', message: `HTTP ${response.status}` });
+      return ScrapeResult.fetchFailed(diag);
     }
 
     const html = await response.text();
+    rawHtml = html;
+    diag.pageSize = html.length;
     const $ = cheerio.load(html);
+    Object.assign(diag, createFetchDiagnostics(response, html));
 
     // Try JSON-LD structured data first (most reliable)
+    diag.parseAttempts.push('json-ld');
+    let jsonLdCandidates = 0;
     $('script[type="application/ld+json"]').each((_, script) => {
       try {
         const data = JSON.parse($(script).html());
@@ -45,6 +56,7 @@ export async function scrapeGeneric(sourceConfig) {
             }
           }
 
+          jsonLdCandidates += eventObjects.length;
           for (const evt of eventObjects) {
             events.push({
               title: decodeHtmlEntities(evt.name),
@@ -65,22 +77,27 @@ export async function scrapeGeneric(sourceConfig) {
           }
         });
       } catch (e) {
-        // JSON parse error
+        diag.errors.push({ stage: 'parse', message: `JSON-LD parse error: ${e.message}` });
       }
     });
+    if (events.length > 0) diag.parseStrategy = 'json-ld';
+    diag.candidateElements = jsonLdCandidates;
 
     // If no JSON-LD, try __NEXT_DATA__ extraction
     if (events.length === 0) {
+      diag.parseAttempts.push('nextdata');
       const nextDataEvents = extractEventsFromNextData($, {
         sourceId: sourceConfig.id,
         sourceName: sourceConfig.name,
         sourceUrl: sourceConfig.url,
       });
       events.push(...nextDataEvents);
+      if (events.length > 0) diag.parseStrategy = 'nextdata';
     }
 
     // If no structured data, try common patterns
     if (events.length === 0) {
+      diag.parseAttempts.push('css-selectors');
       // Look for event cards with common class patterns
       const selectors = [
         '.event-card',
@@ -90,8 +107,10 @@ export async function scrapeGeneric(sourceConfig) {
         '.card[data-event]',
       ];
 
+      let cssMatches = 0;
       for (const selector of selectors) {
         $(selector).each((_, element) => {
+          cssMatches++;
           const $el = $(element);
 
           const title = $el.find('h2, h3, h4, [class*="title"]').first().text().trim();
@@ -119,11 +138,16 @@ export async function scrapeGeneric(sourceConfig) {
 
         if (events.length > 0) break;
       }
+      if (events.length > 0) diag.parseStrategy = 'css-selectors';
+      if (cssMatches > 0) diag.candidateElements = (diag.candidateElements || 0) + cssMatches;
     }
 
   } catch (error) {
     console.error(`Error scraping ${sourceConfig.id}:`, error.message);
+    diag.errors.push({ stage: 'fetch', message: error.message });
   }
+
+  diag.eventsPreFilter = events.length;
 
   // Filter out past events (only when start_time is parseable)
   const now = new Date();
@@ -143,9 +167,14 @@ export async function scrapeGeneric(sourceConfig) {
     return true;
   });
 
+  // Store text snippet when no events found (for content verification)
+  if (deduped.length === 0 && rawHtml) {
+    diag.pageTextSnippet = extractTextSnippet(rawHtml);
+  }
+
   // If HTML was received but no events extracted, signal parse uncertainty
   if (deduped.length === 0) {
-    return ScrapeResult.parseUncertain();
+    return ScrapeResult.parseUncertain(diag);
   }
-  return ScrapeResult.success(deduped);
+  return ScrapeResult.success(deduped, diag);
 }

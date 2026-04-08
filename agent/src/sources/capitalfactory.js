@@ -1,6 +1,8 @@
 import * as cheerio from 'cheerio';
 import { fromZonedTime } from 'date-fns-tz';
 import { decodeHtmlEntities } from '../utils/html.js';
+import { ScrapeResult } from '../utils/scrapeResult.js';
+import { createDiagnostics, createFetchDiagnostics, extractTextSnippet } from '../utils/scrapeDiagnostics.js';
 
 const AUSTIN_TIMEZONE = 'America/Chicago';
 const CF_EVENTS_URL = 'https://info.capitalfactory.com/ic-events';
@@ -21,16 +23,28 @@ const MONTH_MAP = {
  */
 export async function scrapeCapitalFactory(sourceConfig) {
   const events = [];
+  const diag = createDiagnostics();
 
   // Run both scrapers in parallel
-  const [cfEvents, lumaEvents] = await Promise.all([
+  const [cfResult, lumaResult] = await Promise.all([
     scrapeCFEventsPage(sourceConfig),
     scrapeLumaAtCapitalFactory(sourceConfig),
   ]);
 
-  events.push(...cfEvents, ...lumaEvents);
+  events.push(...cfResult.events, ...lumaResult.events);
 
-  console.log(`    [diag] CF own: ${cfEvents.length}, Lu.ma at CF: ${lumaEvents.length}`);
+  // Composite diagnostics from both sub-scrapers
+  diag.httpStatus = cfResult.diag.httpStatus; // primary source
+  diag.pageSize = (cfResult.diag.pageSize || 0) + (lumaResult.diag.pageSize || 0);
+  diag.parseAttempts = [...cfResult.diag.parseAttempts, ...lumaResult.diag.parseAttempts];
+  diag.parseStrategy = cfResult.events.length > 0 ? cfResult.diag.parseStrategy : lumaResult.diag.parseStrategy;
+  diag.candidateElements = (cfResult.diag.candidateElements || 0) + (lumaResult.diag.candidateElements || 0);
+  diag.errors = [...cfResult.diag.errors, ...lumaResult.diag.errors];
+  diag.contentSignals = cfResult.diag.contentSignals || lumaResult.diag.contentSignals;
+
+  console.log(`    [diag] CF own: ${cfResult.events.length}, Lu.ma at CF: ${lumaResult.events.length}`);
+
+  diag.eventsPreFilter = events.length;
 
   // Filter to future events only
   const now = new Date();
@@ -44,11 +58,18 @@ export async function scrapeCapitalFactory(sourceConfig) {
 
   // Dedupe by URL
   const seen = new Set();
-  return upcoming.filter(e => {
+  const deduped = upcoming.filter(e => {
     if (seen.has(e.url)) return false;
     seen.add(e.url);
     return true;
   });
+
+  if (deduped.length === 0) {
+    // Combine text snippets if available
+    diag.pageTextSnippet = cfResult.diag.pageTextSnippet || lumaResult.diag.pageTextSnippet;
+    return ScrapeResult.parseUncertain(diag);
+  }
+  return ScrapeResult.success(deduped, diag);
 }
 
 /**
@@ -57,6 +78,7 @@ export async function scrapeCapitalFactory(sourceConfig) {
  */
 async function scrapeCFEventsPage(sourceConfig) {
   const events = [];
+  const diag = createDiagnostics();
 
   try {
     const response = await fetch(CF_EVENTS_URL, {
@@ -65,12 +87,19 @@ async function scrapeCFEventsPage(sourceConfig) {
       },
     });
 
+    diag.httpStatus = response.status;
+
     if (!response.ok) {
       console.error(`    Failed to fetch ${CF_EVENTS_URL}: ${response.status}`);
-      return events;
+      diag.errors.push({ stage: 'fetch', message: `HTTP ${response.status}` });
+      return { events, diag };
     }
 
     const html = await response.text();
+    diag.pageSize = html.length;
+    Object.assign(diag, createFetchDiagnostics(response, html));
+    diag.parseAttempts.push('text-parsing');
+
     const $ = cheerio.load(html);
 
     // The page has sections by city (AUSTIN, HOUSTON)
@@ -85,7 +114,8 @@ async function scrapeCFEventsPage(sourceConfig) {
     const austinMatch = bodyText.match(/AUSTIN\s*\n([\s\S]*?)(?:HOUSTON|$)/i);
     if (!austinMatch) {
       console.log(`    [diag] Could not find AUSTIN section on CF events page`);
-      return events;
+      diag.pageTextSnippet = extractTextSnippet(html);
+      return { events, diag };
     }
 
     const austinSection = austinMatch[1];
@@ -94,6 +124,7 @@ async function scrapeCFEventsPage(sourceConfig) {
     // Parse event lines — format: "M/D" or "M/D-D" followed by event info
     // Examples: "2/5: First Look, 3-5pm"  "3/12-16: CFHouse during SXSW"  "5/14: Health Supernova"
     const eventLines = austinSection.split('\n').filter(line => line.trim());
+    diag.candidateElements = eventLines.filter(l => l.match(/\d{1,2}\/\d{1,2}/)).length;
 
     for (const line of eventLines) {
       // Match date pattern at start: M/D or M/D-D
@@ -173,11 +204,18 @@ async function scrapeCFEventsPage(sourceConfig) {
       });
     }
 
+    if (events.length > 0) {
+      diag.parseStrategy = 'text-parsing';
+    } else {
+      diag.pageTextSnippet = extractTextSnippet(html);
+    }
+
   } catch (error) {
     console.error(`    Error scraping CF events page:`, error.message);
+    diag.errors.push({ stage: 'parse', message: error.message });
   }
 
-  return events;
+  return { events, diag };
 }
 
 /**
@@ -186,6 +224,7 @@ async function scrapeCFEventsPage(sourceConfig) {
  */
 async function scrapeLumaAtCapitalFactory(sourceConfig) {
   const events = [];
+  const diag = createDiagnostics();
 
   try {
     const response = await fetch(LUMA_AUSTIN_URL, {
@@ -195,28 +234,39 @@ async function scrapeLumaAtCapitalFactory(sourceConfig) {
       },
     });
 
+    diag.httpStatus = response.status;
+
     if (!response.ok) {
       console.error(`    Failed to fetch ${LUMA_AUSTIN_URL}: ${response.status}`);
-      return events;
+      diag.errors.push({ stage: 'fetch', message: `HTTP ${response.status}` });
+      return { events, diag };
     }
 
     const html = await response.text();
+    diag.pageSize = html.length;
+    Object.assign(diag, createFetchDiagnostics(response, html));
+    diag.parseAttempts.push('nextdata-luma-cf');
+
     const $ = cheerio.load(html);
 
     // Extract __NEXT_DATA__ JSON
     const nextDataScript = $('script#__NEXT_DATA__').html();
     if (!nextDataScript) {
       console.log(`    [diag] No __NEXT_DATA__ on Lu.ma Austin page`);
-      return events;
+      diag.pageTextSnippet = extractTextSnippet(html);
+      return { events, diag };
     }
 
     const nextData = JSON.parse(nextDataScript);
     const lumaEvents = nextData?.props?.pageProps?.initialData?.events ||
                        nextData?.props?.pageProps?.initialData?.data?.events || [];
 
+    diag.candidateElements = lumaEvents.length;
+
     if (!lumaEvents.length) {
       console.log(`    [diag] No events in Lu.ma Austin __NEXT_DATA__`);
-      return events;
+      diag.pageTextSnippet = extractTextSnippet(html);
+      return { events, diag };
     }
 
     console.log(`    [diag] Lu.ma Austin has ${lumaEvents.length} total events, filtering for Capital Factory`);
@@ -262,9 +312,16 @@ async function scrapeLumaAtCapitalFactory(sourceConfig) {
       });
     }
 
+    if (events.length > 0) {
+      diag.parseStrategy = 'nextdata-luma-cf';
+    } else {
+      diag.pageTextSnippet = extractTextSnippet(html);
+    }
+
   } catch (error) {
     console.error(`    Error scraping Lu.ma for Capital Factory events:`, error.message);
+    diag.errors.push({ stage: 'parse', message: error.message });
   }
 
-  return events;
+  return { events, diag };
 }

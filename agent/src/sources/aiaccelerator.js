@@ -1,6 +1,8 @@
 import * as cheerio from 'cheerio';
 import { fromZonedTime } from 'date-fns-tz';
 import { decodeHtmlEntities } from '../utils/html.js';
+import { ScrapeResult } from '../utils/scrapeResult.js';
+import { createDiagnostics, createFetchDiagnostics, extractTextSnippet } from '../utils/scrapeDiagnostics.js';
 
 const AUSTIN_TIMEZONE = 'America/Chicago';
 
@@ -111,6 +113,8 @@ function createAustinDate(year, month, day, hour = 9) {
  */
 export async function scrapeAIAccelerator(sourceConfig) {
   const events = [];
+  const diag = createDiagnostics();
+  let rawHtml = null;
 
   try {
     const response = await fetch(sourceConfig.url, {
@@ -119,16 +123,25 @@ export async function scrapeAIAccelerator(sourceConfig) {
       },
     });
 
+    diag.httpStatus = response.status;
+
     if (!response.ok) {
       console.error(`    Failed to fetch ${sourceConfig.url}: ${response.status}`);
-      return events;
+      diag.errors.push({ stage: 'fetch', message: `HTTP ${response.status}` });
+      return ScrapeResult.fetchFailed(diag);
     }
 
     const html = await response.text();
+    rawHtml = html;
+    diag.pageSize = html.length;
+    Object.assign(diag, createFetchDiagnostics(response, html));
     const $ = cheerio.load(html);
 
     // Find event tiles/cards
-    $('[class*="eventCalendarTile"], [class*="eventDetails"]').closest('a, [class*="event"]').each((_, element) => {
+    diag.parseAttempts.push('css-selectors');
+    const eventTiles = $('[class*="eventCalendarTile"], [class*="eventDetails"]').closest('a, [class*="event"]');
+    diag.candidateElements = eventTiles.length;
+    eventTiles.each((_, element) => {
       try {
         const $el = $(element);
 
@@ -225,7 +238,12 @@ export async function scrapeAIAccelerator(sourceConfig) {
       }
     });
 
+    if (events.length > 0) {
+      diag.parseStrategy = 'css-selectors';
+    }
+
     // Also check for JSON-LD
+    diag.parseAttempts.push('json-ld');
     $('script[type="application/ld+json"]').each((_, script) => {
       try {
         const data = JSON.parse($(script).html());
@@ -270,15 +288,28 @@ export async function scrapeAIAccelerator(sourceConfig) {
       }
     });
 
+    if (events.length > 0 && !diag.parseStrategy) {
+      diag.parseStrategy = 'json-ld';
+    }
+
   } catch (error) {
     console.error(`    Error scraping AI Accelerator:`, error.message);
+    diag.errors.push({ stage: 'parse', message: error.message });
   }
+
+  diag.eventsPreFilter = events.length;
 
   // Dedupe by URL
   const seen = new Set();
-  return events.filter(e => {
+  const deduped = events.filter(e => {
     if (seen.has(e.url)) return false;
     seen.add(e.url);
     return true;
   });
+
+  if (deduped.length === 0 && rawHtml) {
+    diag.pageTextSnippet = extractTextSnippet(rawHtml);
+    return ScrapeResult.parseUncertain(diag);
+  }
+  return ScrapeResult.success(deduped, diag);
 }
