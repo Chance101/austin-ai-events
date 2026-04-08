@@ -186,15 +186,24 @@ async function gatherMetrics(pipelineData = {}) {
     if (i < 21 && !eventDays21.has(dayStr)) emptyDays21.push(dayStr);
   }
 
-  // Scraper health: % of active config sources that returned events in their last run
+  // Scraper health: % of active config sources that are actually working
+  // A source is NOT healthy if its most recent scrape failed (403, parse failure, etc.)
+  // even if it produced events in earlier runs — historical success doesn't excuse current breakage
   const configSourceNames = new Set(['AITX', 'Austin AI Alliance', 'Capital Factory', 'AICamp', 'Austin LangChain', 'AI Automation & Marketing', 'UT Austin AI', 'Austin Forum']);
   let healthyScrapers = 0;
   let totalScrapers = 0;
   for (const [name, perf] of Object.entries(sourcePerformance)) {
     if (configSourceNames.has(name)) {
       totalScrapers++;
-      // Healthy = produced events in at least one of their last runs
-      if (perf.totalEvents > 0) healthyScrapers++;
+      const lastStatus = perf.lastScrapeStatus;
+      const lastHttp = perf.lastDiagnostics?.httpStatus;
+      // Healthy = produced events recently AND last scrape wasn't a failure
+      if (perf.totalEvents > 0
+          && lastStatus !== 'fetch_failed'
+          && lastStatus !== 'parse_uncertain'
+          && lastHttp !== 403 && lastHttp !== 429) {
+        healthyScrapers++;
+      }
     }
   }
   const scraperHealthRate = totalScrapers > 0 ? Math.round(healthyScrapers / totalScrapers * 100) : 0;
