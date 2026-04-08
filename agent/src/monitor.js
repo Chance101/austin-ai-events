@@ -197,12 +197,18 @@ async function gatherMetrics(pipelineData = {}) {
       totalScrapers++;
       const lastStatus = perf.lastScrapeStatus;
       const lastHttp = perf.lastDiagnostics?.httpStatus;
-      // Healthy = produced events recently AND last scrape wasn't a failure
-      if (perf.totalEvents > 0
-          && lastStatus !== 'fetch_failed'
-          && lastStatus !== 'parse_uncertain'
-          && lastHttp !== 403 && lastHttp !== 429) {
-        healthyScrapers++;
+      const hasDiagnostics = lastStatus !== undefined;
+      if (hasDiagnostics) {
+        // Diagnostics available — use them for an honest assessment
+        if (perf.totalEvents > 0
+            && lastStatus !== 'fetch_failed'
+            && lastStatus !== 'parse_uncertain'
+            && lastHttp !== 403 && lastHttp !== 429) {
+          healthyScrapers++;
+        }
+      } else {
+        // No diagnostics yet (source not scraped on this run) — fall back to event count
+        if (perf.totalEvents > 0) healthyScrapers++;
       }
     }
   }
