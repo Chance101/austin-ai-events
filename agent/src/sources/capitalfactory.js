@@ -258,13 +258,29 @@ async function scrapeLumaAtCapitalFactory(sourceConfig) {
     }
 
     const nextData = JSON.parse(nextDataScript);
-    const lumaEvents = nextData?.props?.pageProps?.initialData?.events ||
-                       nextData?.props?.pageProps?.initialData?.data?.events || [];
+    const pageProps = nextData?.props?.pageProps || {};
+
+    // Try multiple known paths (Luma changes their structure periodically)
+    let lumaEvents = pageProps?.initialData?.events ||
+                     pageProps?.initialData?.data?.events ||
+                     pageProps?.data?.events ||
+                     pageProps?.events ||
+                     pageProps?.initialData?.data?.featured_items ||
+                     pageProps?.initialData?.featured_items || [];
+
+    // Deep search fallback: find arrays with event-like objects
+    if (!lumaEvents.length) {
+      const found = findLumaEventsDeep(pageProps, 0, 4);
+      if (found) {
+        console.log(`    [diag] CF deep search found ${found.length} Luma event items`);
+        lumaEvents = found;
+      }
+    }
 
     diag.candidateElements = lumaEvents.length;
 
     if (!lumaEvents.length) {
-      console.log(`    [diag] No events in Lu.ma Austin __NEXT_DATA__`);
+      console.log(`    [diag] No events in Lu.ma Austin __NEXT_DATA__. pageProps keys: ${Object.keys(pageProps).join(', ')}`);
       diag.pageTextSnippet = extractTextSnippet(html);
       return { events, diag };
     }
@@ -324,4 +340,32 @@ async function scrapeLumaAtCapitalFactory(sourceConfig) {
   }
 
   return { events, diag };
+}
+
+/**
+ * Recursively search for arrays of Luma event-like objects
+ */
+function findLumaEventsDeep(obj, depth, maxDepth) {
+  if (!obj || depth > maxDepth || typeof obj !== 'object') return null;
+
+  if (Array.isArray(obj)) {
+    if (obj.length > 0) {
+      const first = obj[0];
+      if (first && typeof first === 'object') {
+        if ((first.event?.name && first.event?.start_at) ||
+            (first.name && first.start_at)) {
+          return obj;
+        }
+      }
+    }
+    return null;
+  }
+
+  for (const value of Object.values(obj)) {
+    if (!value || typeof value !== 'object') continue;
+    const found = findLumaEventsDeep(value, depth + 1, maxDepth);
+    if (found) return found;
+  }
+
+  return null;
 }
