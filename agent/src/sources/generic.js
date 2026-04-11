@@ -5,6 +5,98 @@ import { ScrapeResult } from '../utils/scrapeResult.js';
 import { createDiagnostics, createFetchDiagnostics, extractTextSnippet } from '../utils/scrapeDiagnostics.js';
 
 /**
+ * Attempt to repair malformed JSON-LD and parse it.
+ * Handles control characters in strings, trailing commas, invalid escapes.
+ */
+export function tryRepairJsonLd(jsonStr) {
+  if (!jsonStr || typeof jsonStr !== 'string') return null;
+
+  let result = '';
+  let inString = false;
+  let escaped = false;
+
+  for (let i = 0; i < jsonStr.length; i++) {
+    const ch = jsonStr[i];
+
+    if (escaped) {
+      if (!/["\\\/bfnrtu]/.test(ch)) {
+        result += '\\';
+      }
+      result += ch;
+      escaped = false;
+      continue;
+    }
+
+    if (ch === '\\' && inString) {
+      escaped = true;
+      result += ch;
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = !inString;
+      result += ch;
+      continue;
+    }
+
+    if (inString) {
+      if (ch === '\n') { result += '\\n'; continue; }
+      if (ch === '\r') { result += '\\r'; continue; }
+      if (ch === '\t') { result += '\\t'; continue; }
+      if (ch.charCodeAt(0) < 0x20) { continue; }
+    }
+
+    result += ch;
+  }
+
+  result = result.replace(/,(\s*[}\]])/g, '$1');
+
+  try {
+    return JSON.parse(result);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Regex-based fallback extraction of event data from raw JSON-LD text.
+ * Used when JSON is too malformed for repair.
+ */
+export function extractEventsFromRawJsonLd(jsonStr, sourceConfig) {
+  const events = [];
+  const eventTypeRegex = /"@type"\s*:\s*"[^"]*Event[^"]*"/g;
+  let match;
+
+  while ((match = eventTypeRegex.exec(jsonStr)) !== null) {
+    const pos = match.index;
+    const context = jsonStr.substring(pos, Math.min(jsonStr.length, pos + 2000));
+
+    const name = context.match(/"name"\s*:\s*"([^"]+)"/)?.[1];
+    const startDate = context.match(/"startDate"\s*:\s*"([^"]+)"/)?.[1];
+    const endDate = context.match(/"endDate"\s*:\s*"([^"]+)"/)?.[1];
+    const url = context.match(/"url"\s*:\s*"([^"]+)"/)?.[1];
+    const locationName = context.match(/"location"[\s\S]{0,300}"name"\s*:\s*"([^"]+)"/)?.[1];
+    const image = context.match(/"image"\s*:\s*"([^"]+)"/)?.[1];
+
+    if (name && startDate) {
+      events.push({
+        title: decodeHtmlEntities(name),
+        start_time: startDate,
+        end_time: endDate || null,
+        url: url || sourceConfig.url,
+        source: sourceConfig.id,
+        source_event_id: null,
+        venue_name: locationName || null,
+        image_url: image || null,
+        organizer: sourceConfig.name,
+      });
+    }
+  }
+
+  return events;
+}
+
+/**
  * Generic scraper for websites with event listings
  * Attempts to find events using common patterns
  */
@@ -39,7 +131,25 @@ export async function scrapeGeneric(sourceConfig) {
     let jsonLdCandidates = 0;
     $('script[type="application/ld+json"]').each((_, script) => {
       try {
-        const data = JSON.parse($(script).html());
+        const jsonText = $(script).html();
+        let data;
+        try {
+          data = JSON.parse(jsonText);
+        } catch (parseErr) {
+          data = tryRepairJsonLd(jsonText);
+          if (!data) {
+            const regexEvents = extractEventsFromRawJsonLd(jsonText, sourceConfig);
+            if (regexEvents.length > 0) {
+              events.push(...regexEvents);
+              jsonLdCandidates += regexEvents.length;
+              diag.errors.push({ stage: 'parse', message: `JSON-LD malformed, extracted ${regexEvents.length} via regex (${parseErr.message})` });
+            } else {
+              diag.errors.push({ stage: 'parse', message: `JSON-LD parse error: ${parseErr.message}` });
+            }
+            return;
+          }
+          diag.errors.push({ stage: 'parse', message: `JSON-LD repaired (${parseErr.message})` });
+        }
         const items = Array.isArray(data) ? data : [data];
 
         items.forEach(item => {
@@ -105,6 +215,9 @@ export async function scrapeGeneric(sourceConfig) {
         '[class*="event"]',
         'article[class*="event"]',
         '.card[data-event]',
+        '.tribe-events-list-event',
+        '.mec-event-article',
+        '[itemtype*="Event"]',
       ];
 
       let cssMatches = 0;
