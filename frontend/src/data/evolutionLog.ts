@@ -14,6 +14,15 @@ export interface StewardshipEntry {
 
 export const stewardshipLog: StewardshipEntry[] = [
   {
+    id: 'parser-routing-inline-probing',
+    date: '2026-04-15',
+    title: 'Parser Routing + Inline Probing + Kill Switch',
+    problem: 'Newly-discovered URLs on known platforms (lu.ma, meetup.com) got routed to the generic scraper because the Claude evaluator labeled them as "website". luma.com/austin had been discovered 3+ weeks ago with 14+ events visible on the page but sat in a demoted state because it hit the wrong parser 3 times in a row — "testing fish on tree-climbing ability." Beyond the routing bug: newly-discovered URLs waited through a 10-slot probation queue before being tested at all, creating weeks of latency between discovery and first scrape. And the luma.js parser had a custom regex for city pages that didn\'t match the shape luma.com/austin actually uses, even though the shared __NEXT_DATA__ helper already knew how to parse it.',
+    action: 'Four-part foundation fix. (1) New parserRouter.js routes URLs by domain before scraping — lu.ma → luma, luma.com → luma, meetup.com → meetup — overriding whatever type the evaluator guessed. Called from scrapeSource() for every source, so both config and DB-discovered sources benefit. (2) New inlineProbe.js runs the right parser on a URL in the same run it\'s discovered, skipping the probation queue entirely. Probed events flow directly into the main pipeline\'s dedup/validation/upsert path. (3) luma.js now delegates its city-page fallback to the shared extractEventsFromNextData helper, replacing a broken custom regex that failed on city pages. (4) READONLY_MODE env var halts all pipeline writes (events, agent_runs, source tracking, discovery) for safe observation and debugging.',
+    result: 'luma.com/austin now extracts 14 events via the Luma parser — verified end-to-end against the live page. Newly-discovered URLs on known platforms get the right parser and are probed in the same run they\'re found. Feedback loop from discovery to first scrape collapses from weeks to minutes. The kill switch provides a single environment variable to halt all writes during risky changes. This is the foundation Phase 1 (monitor-as-planner) depends on: the pipeline actually uses the right parser for the URL, so the planner can reason about source productivity without being misled by routing failures. First of six phases in the autonomy architecture build.',
+    category: 'foundation',
+  },
+  {
     id: 'scraper-diagnostics-self-healing',
     date: '2026-04-07',
     title: 'Scraper Diagnostics & Self-Healing Foundation',

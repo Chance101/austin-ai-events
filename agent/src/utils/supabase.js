@@ -10,7 +10,36 @@ export function getSupabase() {
   return supabase;
 }
 
+/**
+ * Kill switch — when READONLY_MODE=1, all pipeline database writes are
+ * suppressed and logged. The agent still runs, scrapes, validates, and
+ * classifies, but nothing is written to Supabase. Used for observation,
+ * debugging, and "what would the system do" experiments without touching
+ * production data. Survives every code path because it's checked at each
+ * write call site.
+ */
+export function isReadOnlyMode() {
+  return process.env.READONLY_MODE === '1';
+}
+
+function logReadOnlySkip(operation, payload) {
+  let preview = '';
+  try {
+    preview = typeof payload === 'object' && payload !== null
+      ? JSON.stringify(payload).substring(0, 200)
+      : String(payload).substring(0, 200);
+  } catch {
+    preview = '[unserializable]';
+  }
+  console.warn(`  🔒 READONLY_MODE: ${operation} skipped — ${preview}`);
+}
+
 export async function upsertEvent(event) {
+  if (isReadOnlyMode()) {
+    logReadOnlySkip('upsertEvent', { title: event.title, url: event.url });
+    return { ...event, id: 'readonly-mock', _readonly: true };
+  }
+
   const db = getSupabase();
 
   const { data, error } = await db
@@ -51,6 +80,11 @@ export async function getExistingEvents() {
  * Update key fields on an existing event (date moved, venue changed, etc.)
  */
 export async function updateEventFields(eventId, fields) {
+  if (isReadOnlyMode()) {
+    logReadOnlySkip('updateEventFields', { eventId, fields });
+    return;
+  }
+
   const db = getSupabase();
 
   const { error } = await db
@@ -65,6 +99,11 @@ export async function updateEventFields(eventId, fields) {
 }
 
 export async function markEventAsVerified(eventId) {
+  if (isReadOnlyMode()) {
+    logReadOnlySkip('markEventAsVerified', { eventId });
+    return;
+  }
+
   const db = getSupabase();
 
   const { error } = await db
@@ -82,6 +121,11 @@ export async function markEventAsVerified(eventId) {
  * Log agent run statistics to the database
  */
 export async function logAgentRun(stats) {
+  if (isReadOnlyMode()) {
+    logReadOnlySkip('logAgentRun', { runType: stats.runType, eventsAdded: stats.eventsAdded });
+    return null;
+  }
+
   const db = getSupabase();
   const now = new Date().toISOString();
   const runDuration = Math.round((Date.now() - stats.startTime) / 1000);

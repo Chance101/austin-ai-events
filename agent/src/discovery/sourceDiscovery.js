@@ -1,6 +1,7 @@
 import { config, isMultiTenantPlatform } from '../config.js';
 import { getClient } from '../utils/claude.js';
-import { getSupabase } from '../utils/supabase.js';
+import { getSupabase, isReadOnlyMode } from '../utils/supabase.js';
+import { probeUrl } from '../utils/inlineProbe.js';
 
 // Get supabase client
 const supabase = getSupabase();
@@ -295,6 +296,11 @@ Return ONLY the JSON object, no other text.`;
  * All new sources start in 'probation' tier until they earn trust
  */
 async function addSource(urlInfo, evaluation) {
+  if (isReadOnlyMode()) {
+    console.warn(`    🔒 READONLY_MODE: addSource skipped — ${urlInfo.url}`);
+    return true; // Pretend it was added so the probe still runs
+  }
+
   const { error } = await supabase
     .from('sources')
     .insert({
@@ -324,6 +330,8 @@ async function addSource(urlInfo, evaluation) {
  * On success (sourcesFound > 0): reset priority_score to 1.0 and set last_success_at
  */
 async function updateQueryStats(queryId, sourcesFound) {
+  if (isReadOnlyMode()) return;
+
   const now = new Date().toISOString();
 
   // Get current values for incrementing
@@ -371,6 +379,8 @@ async function updateQueryStats(queryId, sourcesFound) {
  * No query gets a permanent free pass — if it's not producing, it goes.
  */
 async function deactivateFailedQueries() {
+  if (isReadOnlyMode()) return 0;
+
   const { data: queries } = await supabase
     .from('search_queries')
     .select('id, query_text, times_run, sources_found, priority_score, created_by')
@@ -417,6 +427,11 @@ export async function discoverSources(runStats = null) {
     queriesDeactivated: 0,
     claudeApiCalls: 0,
     serpapiCalls: 0,
+    // Events scraped inline from newly-discovered URLs — returned to the
+    // main pipeline for dedup/validation/upsert in the same run.
+    probedEvents: [],
+    probedSources: 0,
+    probedEmpty: 0,
   };
 
   // Get active queries and known sources
@@ -502,6 +517,30 @@ export async function discoverSources(runStats = null) {
           }
 
           sourcesFoundThisQuery++;
+
+          // Inline probing: scrape the new URL right now with the right parser
+          // (platform-aware via routeToParser) and return any events to the
+          // main pipeline. This closes the feedback loop from weeks to minutes —
+          // a source is tested in the same run it's discovered, not after
+          // probation rotation. If the probe fails or returns 0, no harm done:
+          // the source still sits in the DB for future rotation, and the main
+          // pipeline just gets no extra events from it this cycle.
+          try {
+            const probe = await probeUrl(result.url, evaluation.source_type, {
+              name: evaluation.suggested_name || result.title,
+            });
+            stats.probedSources++;
+            if (probe.events.length > 0) {
+              stats.probedEvents.push(...probe.events);
+              console.log(`    🎯 Inline probe (${probe.scraperType}): ${probe.events.length} event(s) extracted`);
+            } else {
+              stats.probedEmpty++;
+              const reason = probe.error || probe.status || 'no events';
+              console.log(`    ⚪ Inline probe (${probe.scraperType}): 0 events — ${reason}`);
+            }
+          } catch (probeError) {
+            console.log(`    ⚠️  Inline probe failed: ${probeError.message}`);
+          }
         }
       }
 
@@ -534,6 +573,8 @@ export async function discoverSources(runStats = null) {
   console.log(`    URLs evaluated:        ${stats.urlsEvaluated}`);
   console.log(`    Sources discovered:    ${stats.sourcesDiscovered}`);
   console.log(`    Trusted sources added: ${stats.trustedSourcesAdded}`);
+  console.log(`    Inline probes run:     ${stats.probedSources}`);
+  console.log(`    Inline events found:   ${stats.probedEvents.length}`);
   console.log(`    Queries deactivated:   ${stats.queriesDeactivated}`);
   console.log('  ' + '─'.repeat(40) + '\n');
 
@@ -728,6 +769,8 @@ export async function getProbationSources() {
  * @param {Object|null} diagnostics - scraper diagnostics (httpStatus, contentSignals, etc.)
  */
 export async function updateSourceStats(sourceUrl, eventsFound, status = 'success', diagnostics = null) {
+  if (isReadOnlyMode()) return;
+
   // First get current source data
   const { data: source } = await supabase
     .from('sources')
@@ -827,6 +870,8 @@ export async function updateSourceStats(sourceUrl, eventsFound, status = 'succes
  * Handles promotion and demotion based on validation pass rates
  */
 export async function updateSourceValidationStats(statsMap) {
+  if (isReadOnlyMode()) return;
+
   for (const [url, stats] of statsMap) {
     // Get current source data
     const { data: source } = await supabase

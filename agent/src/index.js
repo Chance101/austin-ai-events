@@ -12,7 +12,7 @@ import { scrapeCapitalFactory } from './sources/capitalfactory.js';
 import { scrapeUTAustin } from './sources/utaustin.js';
 import { validateEvent, classifyEvent, extractLocationFromImage, verifyPageHasEvents } from './utils/claude.js';
 import { findDuplicates, getEventHash } from './utils/dedup.js';
-import { upsertEvent, getExistingEvents, updateEventFields, logAgentRun, getSupabase } from './utils/supabase.js';
+import { upsertEvent, getExistingEvents, updateEventFields, logAgentRun, getSupabase, isReadOnlyMode } from './utils/supabase.js';
 import { discoverSources, getTrustedSources, getProbationSources, updateSourceStats, updateSourceValidationStats, getEventSearchQueries } from './discovery/sourceDiscovery.js';
 import { analyzeUnprocessedFeedback } from './feedback/analyzeFeedback.js';
 import { runMonitor } from './monitor.js';
@@ -20,6 +20,7 @@ import { RunDecisionLog } from './utils/decisionLog.js';
 import { checkAustinLocation, isMalformedTitle } from './utils/filters.js';
 import { ScrapeResult } from './utils/scrapeResult.js';
 import { classifyScrapeError, classifySilentFailure } from './utils/errors.js';
+import { routeToParser } from './utils/parserRouter.js';
 
 /**
  * Create initial run stats object for tracking throughout the pipeline
@@ -65,6 +66,10 @@ function mapSourceType(dbType) {
 async function discoverEvents() {
   console.log('🚀 Starting Austin AI Events discovery...\n');
 
+  if (isReadOnlyMode()) {
+    console.log('🔒 READONLY_MODE=1 — all database writes will be suppressed.\n');
+  }
+
   // Initialize run stats for tracking throughout the pipeline
   const runStats = createRunStats();
   const decisionLog = new RunDecisionLog();
@@ -86,6 +91,17 @@ async function discoverEvents() {
     runStats.newQueriesGenerated = 0;
     runStats.serpapiCalls += discoveryStats.serpapiCalls || 0;
     runStats.claudeApiCalls += discoveryStats.claudeApiCalls || 0;
+
+    // Inline probing: events scraped from newly-discovered URLs in the same
+    // run they were found. These skip the probation queue entirely and flow
+    // straight into the main dedup/validation/upsert pipeline. This is how
+    // a source like luma.com/austin gets tested immediately instead of
+    // waiting weeks for probation rotation.
+    if (discoveryStats.probedEvents && discoveryStats.probedEvents.length > 0) {
+      allDiscoveredEvents.push(...discoveryStats.probedEvents);
+      runStats.inlineProbeEvents = discoveryStats.probedEvents.length;
+      console.log(`  🎯 ${discoveryStats.probedEvents.length} event(s) from inline probing — queued for validation\n`);
+    }
   } catch (error) {
     console.error('Source discovery error:', error.message);
     runStats.errors++;
@@ -143,17 +159,19 @@ async function discoverEvents() {
   }
 
   // Ensure config sources exist in DB so their stats get tracked
-  const supabase = getSupabase();
-  for (const s of config.sources) {
-    await supabase
-      .from('sources')
-      .upsert({
-        url: s.url,
-        name: s.name,
-        source_type: s.type,
-        trust_tier: 'config',
-        is_active: true,
-      }, { onConflict: 'url', ignoreDuplicates: false });
+  if (!isReadOnlyMode()) {
+    const supabase = getSupabase();
+    for (const s of config.sources) {
+      await supabase
+        .from('sources')
+        .upsert({
+          url: s.url,
+          name: s.name,
+          source_type: s.type,
+          trust_tier: 'config',
+          is_active: true,
+        }, { onConflict: 'url', ignoreDuplicates: false });
+    }
   }
 
   // Start with scheduled config sources
@@ -204,9 +222,19 @@ async function discoverEvents() {
 
   console.log('📡 Scraping sources...');
 
-  // Helper: run the right scraper for a source type
+  // Helper: run the right scraper for a source.
+  // Platform-aware: routeToParser() checks the URL domain first and overrides
+  // the configured type when a known platform matches (lu.ma → luma, meetup.com
+  // → meetup). This fixes the class of failure where a discovered URL on a
+  // known platform gets handed to the generic scraper because Claude labeled
+  // it 'website' instead of 'luma'. Config sources with explicit types still
+  // work: the router returns the same type they already had.
   async function scrapeSource(source) {
-    switch (source.type) {
+    const routedType = routeToParser(source.url) || source.type;
+    if (routedType !== source.type) {
+      console.log(`    🎯 Parser router: ${source.type || 'unknown'} → ${routedType} (URL domain matched)`);
+    }
+    switch (routedType) {
       case 'meetup':       return await scrapeMeetup(source);
       case 'luma':         return await scrapeLuma(source);
       case 'austinforum':  return await scrapeAustinForum(source);
@@ -219,7 +247,7 @@ async function discoverEvents() {
       case 'scrape':
       case 'api':          return await scrapeGeneric(source);
       default:
-        console.log(`    Unknown source type: ${source.type}`);
+        console.log(`    Unknown source type: ${routedType}`);
         return [];
     }
   }
