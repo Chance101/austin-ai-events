@@ -169,7 +169,7 @@ austin-ai-events/
   - `decision_summary`: JSONB snapshot of the pipeline's decision log for that run
 - `human_action_items`: Persistent action items escalated by the monitor for human attention
   - Fields: severity, category, title, description, suggested_fix, is_resolved
-  - Outer loop fields: `action_type`, `affected_files`, `auto_fixable`, `attempt_count`, `last_attempt_at`, `repair_commit`, `repair_status` ('pending' | 'attempted' | 'failed' | 'verified')
+  - Outer loop fields: `action_type`, `affected_files`, `auto_fixable`, `attempt_count`, `last_attempt_at`, `last_terminal_failure_at`, `proposed_at`, `repair_commit`, `repair_status` ('pending' | 'proposed' | 'attempted' | 'verified' | 'failed' | 'rolled_back'). The `proposed` state is the human-review queue — the outer loop has investigated the item but cannot act on it autonomously (scope-gated, out-of-scope fix, or scope requires human approval).
   - Linked to the monitor_report that created them via `monitor_report_id`
 - `repair_log`: Tracks outer loop fix attempts
   - Fields: `action_item_id`, `commit_hash`, `files_changed`, `change_summary`, `test_result`, `verification_result`
@@ -445,9 +445,12 @@ The outer loop is a Claude Code scheduled task that runs daily, 2 hours after th
 - `supabase/migrations/*` — schema (requires human review)
 
 ### Workflow
-1. Query `human_action_items` for highest-severity unresolved item where `auto_fixable = true` and `repair_status = 'pending'`
-2. Check staleness: query current metrics to see if the issue still exists. If resolved, mark as stale and stop.
-3. Check scope: are the `affected_files` within Safe or Moderate tiers? If Restricted or Never, skip.
+1. **Select a candidate.** Query `human_action_items` for the highest-severity unresolved item where `auto_fixable = true` AND `repair_status = 'pending'` AND (`last_terminal_failure_at IS NULL` OR `last_terminal_failure_at < NOW() - INTERVAL '24 hours'`). The 24h cooldown prevents same-day retry loops on structurally stuck items. `proposed`, `failed`, and `rolled_back` states are filtered out of selection.
+2. **Staleness check.** Query current metrics to see if the issue still exists. If the desired outcome has been achieved by another path (e.g., the source now returns events, the coverage gap is filled), transition the item: `repair_status='verified', is_resolved=true, resolved_at=NOW(), last_terminal_failure_at=NOW()`, note the reason in `repair_log`, and stop.
+3. **Scope check.** Are the `affected_files` within Safe or Moderate tiers?
+   - If **Restricted** (propose only): do the full investigation (step 4), write a detailed proposal (the diagnosis + what you'd change), transition the item: `repair_status='proposed', proposed_at=NOW(), attempt_count += 1, last_terminal_failure_at=NOW()`, log the proposal to `repair_log` with `test_result='skipped'` and a `change_summary` starting with `[PROPOSED] `, then stop. The item becomes a human-review queue entry.
+   - If **Never**: transition the item: `repair_status='proposed', proposed_at=NOW(), attempt_count += 1, last_terminal_failure_at=NOW()`, log to `repair_log` explaining why the file is untouchable, stop.
+   - Proposed items are NOT re-selected by step 1, so they stop blocking the queue.
 4. **INVESTIGATE before fixing** (mandatory for scraper issues):
    a. Read the affected scraper code to understand the current parsing logic
    b. Fetch the source URL directly — examine HTTP status, content type, and page structure
@@ -455,23 +458,29 @@ The outer loop is a Claude Code scheduled task that runs daily, 2 hours after th
    d. Compare what the page provides vs. what the scraper expects
    e. Form a specific diagnosis before writing any code (e.g., "JSON-LD now uses ItemList wrapper, parser only checks top-level @type")
    f. If the action item includes diagnostic data (httpStatus, contentSignals, errors), use it as starting context
-5. Make the fix, respecting the tier rules above
+   g. If investigation fails (AUP rejection, URL unreachable, etc.) — this counts as a terminal failure. Transition the item: `attempt_count += 1, last_terminal_failure_at=NOW()`, log the failure reason to `repair_log` with `test_result='skipped'`, and stop. The `attempt_count >= 3` freeze applies to investigation failures too.
+5. **Make the fix**, respecting the tier rules above.
 6. **VERIFY the fix** (mandatory): Run the specific scraper against the live URL to confirm it returns events:
    ```bash
    cd agent && node src/utils/testScraper.js <scraperType> <sourceUrl>
    # Example: node src/utils/testScraper.js generic https://aitinkerers.org/events
    # Available types: meetup, luma, generic, scrape, austinforum, aiaccelerator, austinai, leadersinai, aicamp, capitalfactory, utaustin
    ```
-   If the scraper still returns 0 events, the fix did not work — do NOT commit. Log the failure and stop.
-7. Run `cd agent && npm test` — if tests fail, do not push, log failure to `repair_log`
-8. If tests pass: commit with descriptive message, push to main
-9. Log to `repair_log`: action_item_id, commit_hash, files_changed, change_summary, test_result (include the investigation diagnosis)
-10. Update action item: `repair_status = 'attempted'`, `attempt_count += 1`, `repair_commit = <hash>`
-11. One fix per run. Stop after handling one item.
+   If the scraper still returns 0 events, the fix did not work. Transition the item: `repair_status='failed', attempt_count += 1, last_terminal_failure_at=NOW()`, log the failure to `repair_log`, and stop.
+7. **Run tests.** `cd agent && npm test` — if tests fail, do not push. Transition: `repair_status='failed', attempt_count += 1, last_terminal_failure_at=NOW()`, log to `repair_log`.
+8. **Commit and push, verified.** If tests pass: commit with a descriptive message, push to main, and **verify the push succeeded**. If `git push` fails for any reason (auth, detached HEAD, non-fast-forward, network), treat as fatal: DO NOT claim success. Transition: `repair_status='failed', attempt_count += 1, last_terminal_failure_at=NOW()`, log the push failure reason to `repair_log`, and stop.
+9. **Log the repair.** Write to `repair_log`: action_item_id, commit_hash, files_changed, change_summary, test_result (include the investigation diagnosis).
+10. **Update action item state on success.** `repair_status = 'attempted'`, `attempt_count += 1`, `last_terminal_failure_at = NOW()`, `repair_commit = <hash>`, `last_attempt_at = NOW()`.
+11. **One fix per run.** Stop after handling one item — success, failure, skip, or proposal all count as handling.
+
+**Invariant: every protocol step that terminates must transition action item state** — at minimum `last_terminal_failure_at = NOW()` and (where appropriate) `attempt_count += 1`. The selection query depends on these writes to prevent re-picking the same item. An item that terminates without updating state is queue-head poison.
 
 ### Safety Rails
-- **Oscillation protection:** If `attempt_count >= 3` and `repair_status = 'failed'`, freeze the item and create a GitHub issue
-- **Rollback:** If the monitor marks a repair as `verification_result = 'failed'`, the outer loop should `git revert` the commit on its next run
+- **Oscillation protection:** If `attempt_count >= 3` and `repair_status = 'failed'`, the monitor freezes the item by transitioning it to `rolled_back`. This applies to ANY terminal failure mode (test failure, commit failure, investigation failure, AUP rejection, push failure), not just fix failures.
+- **24-hour cooldown:** Selection query filters out items with `last_terminal_failure_at` in the last 24 hours. Prevents same-run retry loops when investigation is structurally failing.
+- **Scope-gated items are queue-exempt:** Items in `repair_status='proposed'` are the human-review queue. They are never re-selected by the outer loop. Advancing them requires human action (review the proposal, decide: approve-and-merge, reject, or reclassify to a Safe tier).
+- **Rollback:** If the monitor marks a repair as `verification_result = 'failed'`, the outer loop should `git revert` the commit on its next run. The revert itself must be verified-pushed.
+- **Push verification is mandatory:** Silent push failures (detached HEAD, auth, non-fast-forward) are fatal. Always verify the push landed on origin/main before claiming success.
 - **Heartbeat:** The outer loop writes a heartbeat record to `repair_log` on every run (even with nothing to fix) so the monitor can detect if the outer loop is down
 - **Multi-tenant platform awareness:** See "CRITICAL: Multi-Tenant Platform Awareness" above. When resolving action items about sources, never conclude a source is "already covered" based on domain match alone. `luma.com/aitx` does not cover `luma.com/ai-tinkerers` — they are independent organizers on a shared platform.
 - **No direct source lifecycle changes via SQL:** The outer loop must NEVER modify `sources.trust_tier` via direct SQL (UPDATE/INSERT). Source demotions happen only through the pipeline's auto-demotion logic (in `sourceDiscovery.js`) or the monitor's `skip_source` action (in `monitor.js`), both of which have code-level guardrails including multi-tenant platform checks. If an action item involves source changes, modify the config or code — do not bypass the guardrails with raw SQL.

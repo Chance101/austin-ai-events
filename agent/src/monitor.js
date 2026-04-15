@@ -67,11 +67,15 @@ async function gatherMetrics(pipelineData = {}) {
       .from('events')
       .select('id', { count: 'exact', head: true }),
 
-    // Open human action items (for resolution tracking)
+    // Open human action items the outer loop can still act on.
+    // Excludes 'proposed' (human-review queue) and 'rolled_back' (frozen)
+    // so the monitor doesn't treat scope-gated or frozen items as active work.
+    // Those are fetched separately below for visibility.
     supabase
       .from('human_action_items')
-      .select('id, title, description, severity, category, created_at, action_type, auto_fixable, repair_status')
+      .select('id, title, description, severity, category, created_at, action_type, auto_fixable, repair_status, attempt_count, last_terminal_failure_at')
       .eq('is_resolved', false)
+      .not('repair_status', 'in', '(proposed,rolled_back)')
       .order('created_at', { ascending: false }),
 
     // Previous monitor reports (last 5 for continuity)
@@ -1096,23 +1100,47 @@ export async function runMonitor(agentRunId = null, pipelineData = {}) {
 
   console.log('\n  Report saved.');
 
-  // Step 6: Oscillation detection — freeze action items with 3+ failed repair attempts
+  // Step 6: Oscillation detection — freeze items that have hit 3+ terminal
+  // failures across any failure mode (test failure, commit failure, investigation
+  // failure, AUP rejection, push failure, scope-gate skip that didn't transition
+  // to 'proposed'). Previously this only fired on repair_status='failed', which
+  // missed investigation-phase failures that kept the item 'pending' forever.
+  // Now we freeze any pending/failed item with attempt_count >= 3.
   const { data: frozenCandidates } = await supabase
     .from('human_action_items')
     .select('id, title, attempt_count, repair_status')
     .eq('is_resolved', false)
-    .gte('attempt_count', 3)
-    .eq('repair_status', 'failed');
+    .in('repair_status', ['pending', 'failed'])
+    .gte('attempt_count', 3);
 
   if (frozenCandidates && frozenCandidates.length > 0) {
-    console.log(`\n  Oscillation check: ${frozenCandidates.length} item(s) with 3+ failed repairs`);
+    console.log(`\n  Oscillation check: ${frozenCandidates.length} item(s) with 3+ failed attempts`);
     for (const item of frozenCandidates) {
       // Mark as rolled_back to prevent further attempts
       await supabase
         .from('human_action_items')
         .update({ repair_status: 'rolled_back' })
         .eq('id', item.id);
-      console.log(`    Frozen: "${item.title}" (${item.attempt_count} attempts) — needs human intervention`);
+      console.log(`    Frozen: "${item.title}" (${item.attempt_count} attempts, was ${item.repair_status}) — needs human intervention`);
+    }
+  }
+
+  // Step 6.5: Proposed items visibility — surface the human-review queue
+  // so the user can see what the outer loop has investigated but can't touch
+  // autonomously (Restricted-tier files, out-of-scope fixes).
+  const { data: proposedItems } = await supabase
+    .from('human_action_items')
+    .select('id, title, category, proposed_at, affected_files')
+    .eq('is_resolved', false)
+    .eq('repair_status', 'proposed')
+    .order('proposed_at', { ascending: false })
+    .limit(5);
+
+  if (proposedItems && proposedItems.length > 0) {
+    console.log(`\n  Human-review queue: ${proposedItems.length} item(s) the outer loop has proposed fixes for`);
+    for (const item of proposedItems) {
+      const files = Array.isArray(item.affected_files) ? item.affected_files.join(', ') : 'n/a';
+      console.log(`    📋 ${item.category}: "${item.title}" — files: ${files}`);
     }
   }
 
