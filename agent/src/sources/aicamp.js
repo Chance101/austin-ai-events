@@ -1,7 +1,40 @@
 import * as cheerio from 'cheerio';
+import { fromZonedTime } from 'date-fns-tz';
 import { decodeHtmlEntities } from '../utils/html.js';
 import { ScrapeResult } from '../utils/scrapeResult.js';
 import { createDiagnostics, createFetchDiagnostics, extractTextSnippet } from '../utils/scrapeDiagnostics.js';
+
+const AUSTIN_TIMEZONE = 'America/Chicago';
+
+/**
+ * Parse a loose human-format date like "May 06, 2026 05:30 PM" as Austin
+ * local time and return an ISO UTC string.
+ *
+ * Using new Date(str) + toISOString() silently uses the machine's local
+ * timezone, which is UTC on GitHub Actions — that mis-tags Austin 5:30 PM
+ * as UTC 17:30 instead of UTC 22:30. fromZonedTime() handles CST/CDT
+ * correctly based on the date so DST is automatic.
+ */
+function parseAustinDate(monthStr, day, year, timeStr) {
+  const monthNames = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+  const month = monthNames[monthStr.toLowerCase().substring(0, 3)];
+  if (month === undefined) return null;
+
+  const timeMatch = timeStr.match(/(\d{1,2}):(\d{2})\s*([AP]M)/i);
+  if (!timeMatch) return null;
+  let hour = parseInt(timeMatch[1], 10);
+  const minute = parseInt(timeMatch[2], 10);
+  const ampm = timeMatch[3].toUpperCase();
+  if (ampm === 'PM' && hour < 12) hour += 12;
+  if (ampm === 'AM' && hour === 12) hour = 0;
+
+  const isoStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`;
+  try {
+    return fromZonedTime(isoStr, AUSTIN_TIMEZONE).toISOString();
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Scrape Austin AI events from AICamp
@@ -77,7 +110,9 @@ export async function scrapeAICamp(sourceConfig) {
         const monthStr = dateMatch[1];
         const day = dateMatch[2];
         const time = dateMatch[3].trim();
-        const tz = dateMatch[4] || 'CST';
+        // dateMatch[4] captures the source's timezone abbreviation (CDT/CST)
+        // but we ignore it — AICamp's Austin-filtered listing is always Central,
+        // and fromZonedTime() handles DST automatically based on the date.
 
         // Determine the year from the event ID if possible (format: W2026050615)
         // Otherwise use current year — the detail page fetch will get the precise date
@@ -87,11 +122,7 @@ export async function scrapeAICamp(sourceConfig) {
           year = parseInt(eventId.substring(1, 5), 10);
         }
 
-        const dateStr = `${monthStr} ${day}, ${year} ${time}`;
-        const parsed = new Date(dateStr);
-        if (!isNaN(parsed)) {
-          startTime = parsed.toISOString();
-        }
+        startTime = parseAustinDate(monthStr, day, year, time);
       }
 
       // Extract organizer from "By ..." text
@@ -265,13 +296,11 @@ async function fetchEventDetail(url, sourceConfig) {
     }
 
     if (!startTime) {
-      // Fallback: parse text date
+      // Fallback: parse text date, interpreting as Austin local time
       const dateMatch = pageText.match(/(\w{3,9})\s+(\d{1,2}),?\s+(\d{1,2}:\d{2}\s*[AP]M)\s*(\w{3,4})/i);
       if (dateMatch) {
         const year = new Date().getFullYear();
-        const dateStr = `${dateMatch[1]} ${dateMatch[2]}, ${year} ${dateMatch[3].trim()}`;
-        const parsed = new Date(dateStr);
-        if (!isNaN(parsed)) startTime = parsed.toISOString();
+        startTime = parseAustinDate(dateMatch[1], dateMatch[2], year, dateMatch[3].trim());
       }
     }
 

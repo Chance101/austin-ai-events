@@ -8,6 +8,7 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 /**
  * Fetch events server-side for ISR/SSG
  * Returns events for the next 30 days by default
+ * Excludes soft-deleted rows (reconciler merges dupes via deleted_at)
  */
 export async function fetchEventsServer(): Promise<Event[]> {
   if (!supabaseUrl || !supabaseAnonKey) {
@@ -22,6 +23,7 @@ export async function fetchEventsServer(): Promise<Event[]> {
   const { data, error } = await supabase
     .from('events')
     .select('*')
+    .is('deleted_at', null)
     .gte('start_time', now.toISOString())
     .lte('start_time', thirtyDaysFromNow.toISOString())
     .order('start_time', { ascending: true });
@@ -36,6 +38,7 @@ export async function fetchEventsServer(): Promise<Event[]> {
 
 /**
  * Fetch all upcoming events (no 30-day limit)
+ * Excludes soft-deleted rows
  */
 export async function fetchAllEventsServer(): Promise<Event[]> {
   if (!supabaseUrl || !supabaseAnonKey) {
@@ -49,6 +52,7 @@ export async function fetchAllEventsServer(): Promise<Event[]> {
   const { data, error } = await supabase
     .from('events')
     .select('*')
+    .is('deleted_at', null)
     .gte('start_time', now.toISOString())
     .order('start_time', { ascending: true });
 

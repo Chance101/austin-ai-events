@@ -66,7 +66,10 @@ export async function getExistingEvents() {
     .from('events')
     .select('id, title, start_time, end_time, source, source_event_id, url, venue_name, address, organizer')
     // Include past 30 days so recently-passed events are still caught by dedup
-    .gte('start_time', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString());
+    .gte('start_time', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
+    // Exclude soft-deleted rows — the reconciler merges dupes via deleted_at,
+    // and resurrecting them via dedup collision would undo the merge.
+    .is('deleted_at', null);
 
   if (error) {
     console.error('Error fetching existing events:', error);

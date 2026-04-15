@@ -3,6 +3,18 @@ import { parseISO, differenceInHours, isSameDay } from 'date-fns';
 import { checkDuplicate } from './claude.js';
 
 /**
+ * A start_time of exactly 00:00:00 UTC is almost certainly a placeholder
+ * (the source had a date but no time, and the parser filled in midnight).
+ * A real midnight Austin event would be 05:00 or 06:00 UTC, not 00:00 UTC.
+ * When comparing events, treat placeholder midnights as "unknown time" so
+ * strict hour-based matching doesn't miss pairs where one side lacks time.
+ */
+function isPlaceholderMidnightUTC(date) {
+  if (!date) return false;
+  return date.getUTCHours() === 0 && date.getUTCMinutes() === 0 && date.getUTCSeconds() === 0;
+}
+
+/**
  * Normalize title for comparison
  */
 function normalizeTitle(title) {
@@ -140,11 +152,21 @@ export async function findDuplicates(newEvent, existingEvents, runStats = null) 
   // Cross-source time+venue check: catches same event with completely different titles
   // across different sources (e.g., "Texas AI House" vs "March Roundtable Breakfast")
   if (newEvent.source && newDate) {
+    const newIsPlaceholder = isPlaceholderMidnightUTC(newDate);
     const crossSourceCandidates = existingEvents.filter(existing => {
       if (!existing.start_time) return false;
       // Must be from a different source
       if (existing.source === newEvent.source) return false;
       const existingDate = parseISO(existing.start_time);
+      const existingIsPlaceholder = isPlaceholderMidnightUTC(existingDate);
+
+      // When either side is a placeholder midnight (date-only with no real
+      // time), fall back to same-day matching — strict hour diff would miss
+      // pairs where one source lacks time data.
+      if (newIsPlaceholder || existingIsPlaceholder) {
+        return isSameDay(newDate, existingDate);
+      }
+
       const hoursDiff = Math.abs(differenceInHours(newDate, existingDate));
       return hoursDiff <= 3;
     });
