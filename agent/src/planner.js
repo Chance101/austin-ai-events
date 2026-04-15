@@ -30,6 +30,13 @@ import { gatherMetrics } from './monitor.js';
 import { getClient } from './utils/claude.js';
 import { getSupabase, isReadOnlyMode } from './utils/supabase.js';
 import { createCostTracker } from './utils/costTracker.js';
+import {
+  writePredictions,
+  getExpiredPendingExperiments,
+  recordEvaluation,
+  getRecentOutcomes,
+  getConfidenceSummary,
+} from './utils/experimentLog.js';
 
 const DAYS_IN_MS = 24 * 60 * 60 * 1000;
 const FLOOR_WINDOW_DAYS = 7;
@@ -165,7 +172,7 @@ function applyFloorRule(plan, floorDueSources, allConfigSources) {
  * Kept compact relative to the monitor's grading prompt — focused on
  * one decision: what should this run do.
  */
-function buildPlannerPrompt(metrics, budgetRemaining, allConfigSources) {
+function buildPlannerPrompt(metrics, budgetRemaining, allConfigSources, trackRecord) {
   const today = new Date().toISOString().split('T')[0];
 
   // Compact metric view focused on planning needs
@@ -187,6 +194,27 @@ function buildPlannerPrompt(metrics, budgetRemaining, allConfigSources) {
   const configSourceList = allConfigSources.map(s =>
     `  - ${s.name} (${s.url}) — schedule: days ${(s.scrapeDays || []).join(',')}`
   ).join('\n');
+
+  // Track record section — shown to planner so it can learn from
+  // its past predictions. If hit_rate is low, it should be more
+  // conservative; if high, it can be more ambitious.
+  let trackRecordSection = '';
+  if (trackRecord && (trackRecord.summary?.evaluated_count || 0) > 0) {
+    trackRecordSection = `
+## Your Track Record (last 14 days of evaluated predictions)
+- Evaluated: ${trackRecord.summary.evaluated_count}
+- Hit rate: ${trackRecord.summary.hit_rate !== null ? Math.round(trackRecord.summary.hit_rate * 100) + '%' : 'n/a'}
+- Avg confidence delta: ${trackRecord.summary.avg_confidence_delta ?? 'n/a'}
+
+Recent outcomes:
+${(trackRecord.recent || []).slice(0, 5).map(r => {
+  const match = r.outcome_match === true ? '✓' : r.outcome_match === false ? '✗' : '?';
+  return `- [${match}] "${r.hypothesis}" — predicted: ${r.prediction} / actual: ${r.actual_outcome || 'n/a'}`;
+}).join('\n')}
+
+Use this track record. Do NOT repeat actions that failed predictably.
+`;
+  }
 
   return `You are the strategic PLANNER for an autonomous AI events curation system (austinai.events).
 You run at the START of each cycle on Opus because this decision point drives
@@ -216,7 +244,7 @@ minimal — floor sources only, no extra probes.
 
 ## Current Metrics
 ${JSON.stringify(planningView, null, 2)}
-
+${trackRecordSection}
 ## Output Format (JSON only, no markdown):
 {
   "config_sources": [
@@ -288,6 +316,24 @@ export async function runPlanner() {
   console.log('   📊 Gathering metrics...');
   const metrics = await gatherMetrics();
 
+  // 3.5. Evaluate any expired pending experiments from prior runs. The
+  // evaluation updates experiment_log rows so the planner's track record
+  // (passed into the prompt below) reflects current state.
+  try {
+    await evaluateExpiredExperiments(metrics);
+  } catch (error) {
+    console.warn(`   ⚠️  Experiment evaluation failed: ${error.message}`);
+  }
+
+  // 3.6. Pull the planner's recent track record for context injection.
+  const trackRecord = {
+    summary: await getConfidenceSummary(14),
+    recent: await getRecentOutcomes(10),
+  };
+  if (trackRecord.summary.evaluated_count > 0) {
+    console.log(`   📊 Track record: ${trackRecord.summary.evaluated_count} evaluated, ${Math.round((trackRecord.summary.hit_rate || 0) * 100)}% hit rate`);
+  }
+
   // 4. Compute floor-rule-due sources (structural guarantee)
   const floorDueSources = await computeFloorSources();
   if (floorDueSources.length > 0) {
@@ -296,7 +342,7 @@ export async function runPlanner() {
 
   // 5. Ask Opus for a plan
   const anthropic = getClient();
-  const prompt = buildPlannerPrompt(metrics, costTracker.remainingBudget, config.sources);
+  const prompt = buildPlannerPrompt(metrics, costTracker.remainingBudget, config.sources, trackRecord);
 
   let plan = null;
   try {
@@ -363,8 +409,97 @@ export async function runPlanner() {
     }
   }
 
+  // 9. Write predictions to the experiment_log so they can be evaluated
+  // in a future run. This is the "memory" that turns planning decisions
+  // into falsifiable hypotheses the planner learns from.
+  if (planRowId && floorAdjusted.predictions && floorAdjusted.predictions.length > 0) {
+    const written = await writePredictions(planRowId, floorAdjusted.predictions, {
+      evaluationWindowRuns: 1,
+    });
+    if (written.length > 0) {
+      console.log(`   🧪 Wrote ${written.length} prediction(s) to experiment_log (eval after next run)`);
+    }
+  }
+
   console.log('');
   return { plan: floorAdjusted, planRowId, costTracker, reason: 'success' };
+}
+
+/**
+ * Evaluate experiments whose windows have elapsed. For each, compare
+ * the prediction to the actual outcome (reconstructed from the run_plan's
+ * execution_summary and the current metrics snapshot) and record the
+ * result back to experiment_log. Scores feed into the next planner's
+ * track record context.
+ *
+ * This is a lightweight evaluator — it uses pattern matching on the
+ * structured expected_outcome + the current execution summary. A future
+ * version could send ambiguous cases to Haiku for semantic judgment,
+ * but for MVP deterministic rules are fine.
+ */
+async function evaluateExpiredExperiments(metrics) {
+  const pending = await getExpiredPendingExperiments();
+  if (!pending || pending.length === 0) return;
+
+  console.log(`   🧪 Evaluating ${pending.length} expired experiment(s)...`);
+
+  for (const exp of pending) {
+    try {
+      const runPlan = exp.run_plans;
+      const executionSummary = runPlan?.execution_summary || {};
+
+      // Simple deterministic eval: did the linked run actually add events?
+      // If the hypothesis mentions "new events" and the execution added
+      // any, mark it a hit. Otherwise compare the structured expected_outcome.
+      let outcomeMatch = null;
+      let actualOutcome = null;
+      let confidenceDelta = 0;
+      let notes = '';
+
+      const eventsAdded = executionSummary.events_added ?? 0;
+      const eventsValidated = executionSummary.events_validated ?? 0;
+      const inlineProbe = executionSummary.inline_probe_events ?? 0;
+
+      actualOutcome = `run added ${eventsAdded} events (${eventsValidated} validated, ${inlineProbe} via inline probe)`;
+
+      // Heuristic: if the hypothesis mentions a specific count and the
+      // run's actual count is within 50% of that, call it a hit.
+      const predictionStr = (exp.prediction || '').toLowerCase();
+      const countMatch = predictionStr.match(/(\d+)[^\d]*events?/);
+      if (countMatch) {
+        const predictedCount = parseInt(countMatch[1], 10);
+        const tolerance = Math.max(1, Math.round(predictedCount * 0.5));
+        const diff = Math.abs(eventsAdded - predictedCount);
+        outcomeMatch = diff <= tolerance;
+        confidenceDelta = outcomeMatch ? 0.1 : -0.1;
+        notes = `predicted ≈${predictedCount}, actual ${eventsAdded} (±${tolerance} tolerance)`;
+      } else if (predictionStr.includes('new event') || predictionStr.includes('add')) {
+        // Qualitative prediction — treat any positive add as a hit
+        outcomeMatch = eventsAdded > 0;
+        confidenceDelta = outcomeMatch ? 0.05 : -0.05;
+        notes = `qualitative prediction, actual ${eventsAdded} added`;
+      } else {
+        // Too ambiguous to score deterministically — mark evaluated with
+        // no confidence shift rather than leaving it pending forever
+        outcomeMatch = null;
+        confidenceDelta = 0;
+        notes = 'deterministic eval inconclusive — manual review needed';
+      }
+
+      await recordEvaluation(exp.id, {
+        outcome_match: outcomeMatch,
+        actual_outcome: actualOutcome,
+        confidence_delta: confidenceDelta,
+        evaluation_run_id: runPlan?.agent_run_id || null,
+        evaluation_notes: notes,
+      });
+
+      const badge = outcomeMatch === true ? '✓' : outcomeMatch === false ? '✗' : '?';
+      console.log(`      [${badge}] ${exp.hypothesis?.substring(0, 60)} — ${notes}`);
+    } catch (error) {
+      console.warn(`      ⚠️  Error evaluating experiment ${exp.id}: ${error.message}`);
+    }
+  }
 }
 
 /**

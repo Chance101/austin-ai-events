@@ -14,6 +14,15 @@ export interface StewardshipEntry {
 
 export const stewardshipLog: StewardshipEntry[] = [
   {
+    id: 'experiment-log-hypothesis-tracking',
+    date: '2026-04-15',
+    title: 'Experiment Log — Planner Predictions Become Falsifiable',
+    problem: 'The planner (Phase 1) was making predictions but nothing was checking whether those predictions held. The planner could say "luma.com/austin will produce 3+ new events" and then, if it produced 0, the planner would have no memory of the miss and would confidently make the same kind of prediction next run. Without a feedback loop that grades predictions against outcomes, the planner accumulates data without learning. The user\'s stated agentic AI philosophy (user_agentic_ai_philosophy.md) puts learning loops at the center of what matters — logging without evaluation isn\'t learning.',
+    action: 'Three pieces. (1) New migration 021_experiment_log.sql — experiment_log table storing each prediction with hypothesis, action_taken, structured expected_outcome, evaluation_window_runs, and status. Links back to the run_plan that produced it. (2) New agent/src/utils/experimentLog.js — writePredictions (called when a plan is built), getExpiredPendingExperiments (called at start of next run), recordEvaluation, getRecentOutcomes, getConfidenceSummary. (3) Wired into planner.js: at start of each run, evaluateExpiredExperiments() reads pending experiments whose windows have elapsed, compares prediction against the linked run\'s execution_summary, writes outcome_match + confidence_delta back. Then the planner fetches its own track record (getConfidenceSummary over 14 days + getRecentOutcomes) and injects it into its prompt so Opus sees "you predicted X, the outcome was Y, here\'s your hit rate."',
+    result: 'The compounding-intelligence loop is now complete structurally. On each run: planner reads its track record, makes new predictions with that context, writes them to experiment_log. On the next run: evaluator grades them based on actual execution results, updates confidence, the next planner prompt includes the updated track record. Predictions become falsifiable hypotheses the system can learn from instead of claims it forgets. The MVP evaluator is deterministic (compares predicted counts to actual) — ambiguous cases are marked "inconclusive" rather than guessed, consistent with the feedback_dont_guess_canonical principle. Phase 2 of the autonomy architecture build. Six core phases complete in one day.',
+    category: 'capability',
+  },
+  {
     id: 'monitor-as-planner',
     date: '2026-04-15',
     title: 'Monitor as Planner — Intelligence Drives Execution (Feature-Flagged)',
