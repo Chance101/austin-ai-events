@@ -7,8 +7,12 @@ const supabase = getSupabase();
 /**
  * Gather all metrics from the database for evaluation
  * @param {Object} [pipelineData] - Data passed from the pipeline (decisionSummary, etc.)
+ *
+ * Exported so the Phase 1 planner (agent/src/planner.js) can reuse the
+ * same metrics view. The planner runs at the start of each cycle and
+ * the monitor still runs at the end — they read the same state.
  */
-async function gatherMetrics(pipelineData = {}) {
+export async function gatherMetrics(pipelineData = {}) {
   const now = new Date();
   const thirtyDaysAgo = new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString();
   const sevenDaysAgo = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString();

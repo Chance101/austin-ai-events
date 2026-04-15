@@ -1,5 +1,32 @@
 import 'dotenv/config';
 
+// ============================================================================
+// READ-ONLY — DO NOT EDIT WITHOUT HUMAN REVIEW
+// ============================================================================
+// Daily budget ceiling for Anthropic API spend across all phases of a run.
+// Checked at start of run (refuse to start if today's cumulative spend already
+// exceeds) AND before each Opus/Sonnet call (graceful degrade — skip expensive
+// calls, let Haiku work finish since Haiku is trivially cheap).
+//
+// This is a FLOOR guarantee for cost control. The planner may read this value
+// but must never modify it. The autonomous outer loop must never edit this
+// constant. Monitor-as-planner is explicitly told about this cap in its
+// context so it can plan within budget.
+//
+// Current baseline (14-day average, 2026-04): ~$0.15-$0.25/day.
+// Tight cap prevents "budget absorption" where agents fill any available
+// budget with marginal-value work.
+export const MAX_DAILY_ANTHROPIC_SPEND_USD = 1.00;
+// ============================================================================
+
+// Estimated per-call costs for budget tracking. These are rough — actual
+// billing comes from Anthropic — but good enough for in-process enforcement.
+export const ESTIMATED_COST_PER_CALL = {
+  fast: 0.001,       // Haiku: ~$0.25/M input, ~$1.25/M output, ~500 tokens average
+  standard: 0.015,   // Sonnet: higher context + more output for source evaluation
+  strategic: 0.10,   // Opus: large context (metrics + reports + plan), 4K output
+};
+
 export const config = {
   // API Keys
   anthropicApiKey: process.env.ANTHROPIC_API_KEY,

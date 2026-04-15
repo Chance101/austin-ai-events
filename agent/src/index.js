@@ -16,6 +16,8 @@ import { upsertEvent, getExistingEvents, updateEventFields, logAgentRun, getSupa
 import { discoverSources, getTrustedSources, getProbationSources, updateSourceStats, updateSourceValidationStats, getEventSearchQueries } from './discovery/sourceDiscovery.js';
 import { analyzeUnprocessedFeedback } from './feedback/analyzeFeedback.js';
 import { runMonitor } from './monitor.js';
+import { runPlanner, completeRunPlan } from './planner.js';
+import { probeUrl } from './utils/inlineProbe.js';
 import { RunDecisionLog } from './utils/decisionLog.js';
 import { checkAustinLocation, isMalformedTitle } from './utils/filters.js';
 import { ScrapeResult } from './utils/scrapeResult.js';
@@ -70,6 +72,14 @@ async function discoverEvents() {
     console.log('🔒 READONLY_MODE=1 — all database writes will be suppressed.\n');
   }
 
+  // Phase 1 feature flag: use monitor-as-planner at start of cycle.
+  // When unset, use the existing day-of-week schedule-based path.
+  // When set, the planner produces a runPlan that drives scrape/probe/query selection.
+  const usePlanner = process.env.USE_PLANNER === '1';
+  if (usePlanner) {
+    console.log('🧠 USE_PLANNER=1 — planner will drive this run\n');
+  }
+
   // Initialize run stats for tracking throughout the pipeline
   const runStats = createRunStats();
   const decisionLog = new RunDecisionLog();
@@ -78,6 +88,28 @@ async function discoverEvents() {
   validateConfig();
 
   const allDiscoveredEvents = [];
+
+  // Phase 1: Planner (when USE_PLANNER=1)
+  let runPlan = null;
+  let planRowId = null;
+  let plannerCostTracker = null;
+  if (usePlanner) {
+    try {
+      const plannerResult = await runPlanner();
+      runPlan = plannerResult.plan;
+      planRowId = plannerResult.planRowId;
+      plannerCostTracker = plannerResult.costTracker;
+      if (plannerCostTracker) {
+        runStats.claudeApiCalls += plannerCostTracker.callLog?.strategic || 0;
+      }
+      if (!runPlan) {
+        console.warn(`   ⚠️  Planner did not produce a plan (${plannerResult.reason}) — falling back to schedule-based path\n`);
+      }
+    } catch (error) {
+      console.error(`   ❌ Planner crashed: ${error.message} — falling back to schedule-based path\n`);
+      runPlan = null;
+    }
+  }
 
   // 0. Run source discovery first (find new sources via search)
   console.log('=' .repeat(50));
@@ -137,25 +169,40 @@ async function discoverEvents() {
 
   console.log('📡 Gathering sources...');
 
-  // Filter config sources by scrape schedule (day of week)
+  // Source selection: planner-driven OR schedule-based OR scrape-all override.
+  const scrapeAll = process.env.SCRAPE_ALL === '1';
   const today = new Date();
   const dayOfWeek = today.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
   const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-  const scrapeAll = process.env.SCRAPE_ALL === '1';
-  const scheduledSources = scrapeAll
-    ? config.sources
-    : config.sources.filter(s => {
-        if (!s.scrapeDays) return true; // No schedule = scrape daily
-        return s.scrapeDays.includes(dayOfWeek);
-      });
-  const skippedSources = scrapeAll
-    ? []
-    : config.sources.filter(s => s.scrapeDays && !s.scrapeDays.includes(dayOfWeek));
+  let scheduledSources;
+  let skippedSources;
 
-  console.log(`  📅 ${dayNames[dayOfWeek]}: ${scheduledSources.length} sources scheduled, ${skippedSources.length} skipped`);
-  if (skippedSources.length > 0) {
-    console.log(`     Skipped today: ${skippedSources.map(s => s.name).join(', ')}`);
+  if (scrapeAll) {
+    scheduledSources = config.sources;
+    skippedSources = [];
+    console.log(`  🔓 SCRAPE_ALL=1 override: ${scheduledSources.length} config sources`);
+  } else if (usePlanner && runPlan) {
+    // Planner-driven selection. runPlan.config_sources is a list of {name, url, reason}.
+    // The floor rule has already been applied inside runPlanner(), so any config
+    // source that needed scraping (7-day floor) is guaranteed to be in the plan.
+    const plannedUrls = new Set((runPlan.config_sources || []).map(s => s.url));
+    scheduledSources = config.sources.filter(s => plannedUrls.has(s.url));
+    skippedSources = config.sources.filter(s => !plannedUrls.has(s.url));
+    console.log(`  🧠 Planner-driven: ${scheduledSources.length} config sources selected, ${skippedSources.length} skipped`);
+    if (scheduledSources.length > 0) {
+      console.log(`     Scraping: ${scheduledSources.map(s => s.name).join(', ')}`);
+    }
+  } else {
+    scheduledSources = config.sources.filter(s => {
+      if (!s.scrapeDays) return true; // No schedule = scrape daily
+      return s.scrapeDays.includes(dayOfWeek);
+    });
+    skippedSources = config.sources.filter(s => s.scrapeDays && !s.scrapeDays.includes(dayOfWeek));
+    console.log(`  📅 ${dayNames[dayOfWeek]}: ${scheduledSources.length} sources scheduled, ${skippedSources.length} skipped`);
+    if (skippedSources.length > 0) {
+      console.log(`     Skipped today: ${skippedSources.map(s => s.name).join(', ')}`);
+    }
   }
 
   // Ensure config sources exist in DB so their stats get tracked
@@ -181,43 +228,47 @@ async function discoverEvents() {
   }));
   const configUrls = new Set(config.sources.map(s => s.url));
 
-  // Add trusted DB sources not in config
-  try {
-    const dbSources = await getTrustedSources();
-    for (const dbSource of dbSources) {
-      if (!configUrls.has(dbSource.url)) {
-        // Map DB source to scraper config format
-        // Use 'web-search' as the source enum for dynamically discovered sources
-        allSources.push({
-          id: 'web-search',  // Use valid enum value, not UUID
-          name: dbSource.name,
-          url: dbSource.url,
-          type: mapSourceType(dbSource.source_type),
-          fromDb: true,
-          trust_tier: dbSource.trust_tier || 'probation',
-        });
+  // DB sources: under USE_PLANNER, probation rotation is OFF — any DB
+  // source must be explicitly listed in runPlan.extra_urls. Under the
+  // legacy path, probation rotation still works.
+  if (!usePlanner) {
+    try {
+      const dbSources = await getTrustedSources();
+      for (const dbSource of dbSources) {
+        if (!configUrls.has(dbSource.url)) {
+          allSources.push({
+            id: 'web-search',
+            name: dbSource.name,
+            url: dbSource.url,
+            type: mapSourceType(dbSource.source_type),
+            fromDb: true,
+            trust_tier: dbSource.trust_tier || 'probation',
+          });
+        }
       }
-    }
 
-    // Also add probation sources (limited to 10 per run)
-    const probationSources = await getProbationSources();
-    for (const dbSource of probationSources) {
-      if (!configUrls.has(dbSource.url)) {
-        allSources.push({
-          id: 'web-search',
-          name: dbSource.name,
-          url: dbSource.url,
-          type: mapSourceType(dbSource.source_type),
-          fromDb: true,
-          trust_tier: 'probation',
-        });
+      const probationSources = await getProbationSources();
+      for (const dbSource of probationSources) {
+        if (!configUrls.has(dbSource.url)) {
+          allSources.push({
+            id: 'web-search',
+            name: dbSource.name,
+            url: dbSource.url,
+            type: mapSourceType(dbSource.source_type),
+            fromDb: true,
+            trust_tier: 'probation',
+          });
+        }
       }
-    }
 
-    console.log(`  Config sources: ${config.sources.length}, Trusted DB: ${dbSources.length}, Probation: ${probationSources.length}`);
-    console.log(`  Total unique sources: ${allSources.length}\n`);
-  } catch (error) {
-    console.error('Error fetching DB sources:', error.message);
+      console.log(`  Config sources: ${config.sources.length}, Trusted DB: ${dbSources.length}, Probation: ${probationSources.length}`);
+      console.log(`  Total unique sources: ${allSources.length}\n`);
+    } catch (error) {
+      console.error('Error fetching DB sources:', error.message);
+    }
+  } else {
+    console.log(`  Config sources (planner-selected): ${allSources.length}`);
+    console.log(`  Probation rotation: disabled under USE_PLANNER (use runPlan.extra_urls instead)\n`);
   }
 
   console.log('📡 Scraping sources...');
@@ -407,11 +458,40 @@ async function discoverEvents() {
     }
   }
 
-  // 2. Web search for additional events
+  // 2a. Planner-requested extra URLs: inline probe any URLs the planner
+  // added to runPlan.extra_urls. Under USE_PLANNER, this is the only way
+  // DB-discovered or otherwise-specified URLs get scraped (probation
+  // rotation is off). The probe uses the correct parser via routeToParser.
+  if (usePlanner && runPlan?.extra_urls && runPlan.extra_urls.length > 0) {
+    console.log(`\n🎯 Inline probing ${runPlan.extra_urls.length} planner-requested URL(s)...`);
+    for (const entry of runPlan.extra_urls) {
+      try {
+        const probe = await probeUrl(entry.url, entry.parser_hint || 'scrape', { name: entry.url });
+        if (probe.events && probe.events.length > 0) {
+          allDiscoveredEvents.push(...probe.events);
+          console.log(`   🎯 ${entry.url} (${probe.scraperType}): ${probe.events.length} event(s) — ${entry.reason || 'no reason given'}`);
+        } else {
+          console.log(`   ⚪ ${entry.url} (${probe.scraperType}): 0 events — ${probe.error || probe.status || 'no events'}`);
+        }
+      } catch (error) {
+        console.error(`   ⚠️  Inline probe failed for ${entry.url}: ${error.message}`);
+      }
+    }
+  }
+
+  // 2b. Web search for additional events.
+  // Under USE_PLANNER, use runPlan.event_queries (planner-chosen). Otherwise
+  // fall back to getEventSearchQueries() which rotates by last_run.
   console.log('\n🔍 Searching web for additional events...');
   try {
-    const eventQueries = await getEventSearchQueries(2);
-    console.log(`  Using ${eventQueries.length} search queries`);
+    let eventQueries;
+    if (usePlanner && runPlan?.event_queries && runPlan.event_queries.length > 0) {
+      eventQueries = runPlan.event_queries.map(q => q.query_text);
+      console.log(`  Using ${eventQueries.length} planner-selected queries`);
+    } else {
+      eventQueries = await getEventSearchQueries(2);
+      console.log(`  Using ${eventQueries.length} schedule-selected queries`);
+    }
     const { events: searchResults, serpapiCalls } = await searchEvents(eventQueries, runStats);
     console.log(`  Found ${searchResults.length} potential events from web search`);
     allDiscoveredEvents.push(...searchResults);
@@ -684,9 +764,32 @@ async function discoverEvents() {
   // 6. Log run to database
   const agentRunResult = await logAgentRun(runStats);
 
-  // 7. Run monitor evaluation
+  // 6.5. If the planner produced a plan, mark it completed and attach
+  // execution summary so the monitor can grade against it.
+  if (usePlanner && planRowId) {
+    try {
+      await completeRunPlan(
+        planRowId,
+        agentRunResult?.id || null,
+        {
+          sources_scraped: runStats.sourcesScraped,
+          events_discovered: runStats.eventsDiscovered,
+          events_validated: runStats.eventsValidated,
+          events_added: runStats.eventsAdded,
+          duplicates_skipped: runStats.duplicatesSkipped,
+          inline_probe_events: runStats.inlineProbeEvents || 0,
+          errors: runStats.errors,
+        },
+        plannerCostTracker,
+      );
+    } catch (error) {
+      console.error(`   ⚠️  Could not complete run plan: ${error.message}`);
+    }
+  }
+
+  // 7. Run monitor evaluation (still end-of-cycle; planner is start-of-cycle)
   try {
-    await runMonitor(agentRunResult?.id || null, { decisionSummary });
+    await runMonitor(agentRunResult?.id || null, { decisionSummary, runPlan, planRowId });
   } catch (error) {
     console.error('Monitor evaluation failed:', error.message);
   }
