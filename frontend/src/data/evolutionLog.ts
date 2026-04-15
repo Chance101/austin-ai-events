@@ -14,6 +14,15 @@ export interface StewardshipEntry {
 
 export const stewardshipLog: StewardshipEntry[] = [
   {
+    id: 'external-watchdog-repo',
+    date: '2026-04-15',
+    title: 'External Watchdog Repo — Ground-Truth Liveness and Coverage',
+    problem: 'The system grades itself. Internal metrics can all report healthy while the actual calendar output is broken — the "dead system" and "confident lobotomy" failure modes. Nothing outside the main repo\'s modification scope was watching whether events were actually flowing. Worse: we had no measurement of coverage at all — whether we were capturing all AI events in Austin or missing half of them. No way to tell if the system was getting better at its real job. The 2026-04-08 five-agent autonomy analysis called this out as a non-negotiable guardrail: at least one measurement of success must live outside the system\'s control.',
+    action: 'Created a separate repository, austin-ai-events-watchdog, isolated from the main project\'s modification scope. Lives at /Users/chasehitchens/Projects/austin-ai-events-watchdog as its own git repo with its own package.json, its own dependencies, and its own GitHub Actions workflow (6-hour cron). Two checks: (1) Liveness — reads the main Supabase events table via anon key, counts upcoming events in the next 14 days, alerts if below threshold. (2) Coverage ground truth — fetches luma.com/austin directly with a deliberately duplicated Luma-parsing implementation (if the main repo\'s Luma parser breaks, the watchdog\'s still works — that\'s the point), filters to AI-related events, and cross-references against our DB. Outputs a coverage percentage and lists gap event titles. Writes findings to a new coverage_audits table in the main DB (migration 019) when a service role key is provided. The watchdog has a kill switch (WATCHDOG_DISABLED env var) that only the human can set — the main system cannot touch the watchdog repo\'s secrets or workflow.',
+    result: 'First end-to-end run against the live DB surfaced an immediate real finding: 10 events in the 14-day window (liveness: healthy), but 0% coverage against Luma — 2 AI-related Austin events are on luma.com/austin ("Vibe Code for Finance — Austin" on Apr 16, "Hack AI x PostHog" on Apr 20) and NEITHER is in our DB. This is the exact class of gap the watchdog was designed to catch — the main system had no way to tell it was missing them. Phase 0 fixed the Luma parser so these events WILL flow in on the next scheduled run, but the watchdog gave us the visibility to confirm that before the run happens. The watchdog repo is 5 files, one GitHub Actions workflow, and zero connection to the main codebase — the kind of minimal isolation that a self-modifying system needs to remain trustable. Phase 3 of the autonomy architecture build.',
+    category: 'foundation',
+  },
+  {
     id: 'dedup-reconciler-and-aicamp-timezone',
     date: '2026-04-15',
     title: 'Dedup Reconciler + AICamp Timezone Fix + Soft-Delete',
