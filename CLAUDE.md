@@ -104,18 +104,26 @@ austin-ai-events/
 │   │   │   └── websearch.test.js      # URL matching tests
 │   │   ├── utils/
 │   │   │   ├── claude.js              # Claude API calls (validation, classification, content verification)
+│   │   │   ├── costTracker.js         # Daily budget enforcement (MAX_DAILY_ANTHROPIC_SPEND_USD)
 │   │   │   ├── dedup.js               # Fuzzy matching + duplicate detection
 │   │   │   ├── dedup.test.js          # Dedup unit tests
 │   │   │   ├── decisionLog.js         # In-memory pipeline decision capture
 │   │   │   ├── errors.js              # Scraper error classification (transient/structural/permanent)
+│   │   │   ├── experimentLog.js       # Falsifiable prediction tracking (write/evaluate/summarize)
 │   │   │   ├── filters.js             # Austin location check + malformed title detection
 │   │   │   ├── filters.test.js        # Filter unit tests
+│   │   │   ├── inlineProbe.js         # Same-run probing of discovered URLs with correct parser
+│   │   │   ├── parserRouter.js        # URL-domain-based scraper routing (lu.ma→luma, meetup.com→meetup)
+│   │   │   ├── parserRouter.test.js   # Parser router unit tests
+│   │   │   ├── reconciler.js          # Post-hoc duplicate sweep with Haiku merge decisions
+│   │   │   ├── scrapers.js            # Shared scraper type→function registry
 │   │   │   ├── scrapeDiagnostics.js   # Shared scraper diagnostic helpers (content signals, text snippets)
-│   │   │   ├── supabase.js            # Database operations
+│   │   │   ├── supabase.js            # Database operations + READONLY_MODE kill switch
 │   │   │   └── testScraper.js         # Run a single scraper for verification (CLI + import)
-│   │   ├── monitor.js                 # Self-monitoring agent (health reports + auto-fix)
+│   │   ├── monitor.js                 # Self-monitoring agent (health reports + auto-fix, exports gatherMetrics)
+│   │   ├── planner.js                 # Start-of-cycle strategic planner (USE_PLANNER=1, Opus-driven)
 │   │   ├── discovery/
-│   │   │   └── sourceDiscovery.js     # Autonomous source discovery
+│   │   │   └── sourceDiscovery.js     # Autonomous source discovery + inline probing
 │   │   └── feedback/
 │   │       └── analyzeFeedback.js     # User feedback analysis
 │   └── .env.example                   # Environment template
@@ -135,7 +143,12 @@ austin-ai-events/
         ├── 010_monitor_enrichment.sql  # Action review + decision summary on monitor_reports
         ├── 011_source_context.sql      # Per-source validation context on sources
         ├── 012_human_action_items.sql  # Human escalation action items table
-        └── add_consecutive_fetch_failures.sql  # Separate fetch failure tracking on sources
+        ├── add_consecutive_fetch_failures.sql  # Separate fetch failure tracking on sources
+        ├── 017_repair_status_proposed.sql  # 'proposed' state + last_terminal_failure_at + proposed_at
+        ├── 018_dedup_reconciler.sql     # Soft-delete columns on events + dedup_trace table
+        ├── 019_coverage_audits.sql      # External watchdog writes coverage ground-truth here
+        ├── 020_run_plans.sql            # Planner run plans (JSONB plan + execution summary)
+        └── 021_experiment_log.sql       # Falsifiable predictions from the planner
 ```
 
 ## Key Database Schema
@@ -176,6 +189,25 @@ austin-ai-events/
   - Linked to `human_action_items` via `action_item_id`
 - `feedback_missed_events`: User-submitted event suggestions from the calendar page
   - Fields: `url`, `comment`, `ip_hash`, `created_at`
+- `run_plans`: Planner-produced run plans (USE_PLANNER=1)
+  - `plan`: JSONB with `config_sources`, `extra_urls`, `event_queries`, `source_queries`, `predictions`
+  - `execution_summary`: JSONB with actual results after the run
+  - `estimated_cost_usd`, `actual_cost_usd`: Budget tracking
+  - `status`: 'pending' | 'executing' | 'completed' | 'cost_capped' | 'failed' | 'superseded'
+  - Linked to `agent_runs` via `agent_run_id`
+- `experiment_log`: Falsifiable predictions from the planner
+  - `hypothesis`, `prediction`, `expected_outcome` (JSONB)
+  - `evaluation_window_runs`, `evaluate_after`: When to grade the prediction
+  - `outcome_match` (boolean), `confidence_delta` (-1 to +1), `actual_outcome`
+  - `status`: 'pending' | 'evaluated' | 'stale' | 'cancelled'
+  - Linked to `run_plans` via `run_plan_id`
+- `dedup_trace`: Per-upsert audit trail of dedup decisions
+  - `event_title`, `event_url`, `event_source`, `event_start_time`
+  - `candidates_considered` (JSONB), `best_match_id`, `best_match_score`
+  - `stage`, `outcome`, `reason`
+- `coverage_audits`: External watchdog liveness + coverage ground-truth
+  - Written by `austin-ai-events-watchdog` (separate repo, isolated from this codebase)
+  - `events_in_db`, `events_on_luma`, `coverage_percentage`, `gap_event_titles`, `liveness_status`
 
 ## Development Patterns
 
@@ -218,7 +250,11 @@ The system uses three model tiers, configured in `config.js`:
 | `standard` | `claude-sonnet-4-6` | Source evaluation, image analysis | $0.01 |
 | `strategic` | `claude-opus-4-6` | Monitor evaluation (system brain) | $0.10 |
 
-**Design principle:** Haiku handles ~80% of calls (high-volume, structured tasks). The one expensive Opus call goes to the monitor — the only place where deep reasoning drives system behavior.
+**Design principle:** Haiku handles ~80% of calls (high-volume, structured tasks). Opus now has TWO calls per run: planner (start) + monitor (end). Both drive system behavior with deep reasoning.
+
+**Cost cap:** `MAX_DAILY_ANTHROPIC_SPEND_USD = 1.00` in `config.js` (READ-ONLY — DO NOT EDIT WITHOUT HUMAN REVIEW). The `costTracker.js` utility checks cumulative today's spend at start of each run and gates Opus/Sonnet calls on remaining budget. Haiku always allowed (trivially cheap). Current baseline: ~$0.25-$0.35/day. Cap prevents budget absorption.
+
+**READONLY_MODE kill switch:** `READONLY_MODE=1` env var suppresses ALL database writes across the pipeline (events, agent_runs, sources, search_queries, human_action_items, run_plans, experiment_log). The agent still scrapes, validates, and classifies — it just doesn't write. Useful for dry-run testing and observation.
 
 **Access models via config:**
 ```javascript
@@ -228,13 +264,79 @@ import { config } from '../config.js';
 // config.models.strategic → Opus (monitor evaluation)
 ```
 
+### Parser Router & Inline Probing (Phase 0)
+**Parser Router** (`utils/parserRouter.js`): Before scraping any URL, `routeToParser(url)` checks the hostname against known platform parsers:
+- `lu.ma`, `luma.com` → `luma` parser
+- `meetup.com` → `meetup` parser
+- All others → fall through to configured `source.type`
+
+This overrides the Claude evaluator's type guess. A `lu.ma` URL always uses the Luma parser regardless of what the evaluator labeled it. Called from `scrapeSource()` in `index.js`.
+
+**Inline Probing** (`utils/inlineProbe.js`): When `discoverSources()` finds a new URL, it probes it in the same run via `probeUrl()` — fetch + route to correct parser + extract events. Probed events flow directly into the main dedup/validation/upsert pipeline. No more probation queue delay.
+
+### Planner (Phase 1 — USE_PLANNER=1)
+When `USE_PLANNER=1` env var is set, the planner (`planner.js`) runs at the START of each cycle. The monitor still runs at the END. They coexist.
+
+**How the planner works:**
+1. Checks today's cumulative spend against `MAX_DAILY_ANTHROPIC_SPEND_USD` (refuses to start if over)
+2. Gathers metrics via `gatherMetrics()` (exported from `monitor.js`)
+3. Evaluates pending experiments from prior runs (updates `experiment_log` with outcomes)
+4. Fetches its own track record (hit rate, recent predictions) for context injection
+5. Asks Opus for a `runPlan` with: `config_sources`, `extra_urls`, `event_queries`, `source_queries`, `predictions`
+6. Applies the structural floor rule: any config source not scraped in 7 days is auto-added
+7. Writes plan to `run_plans` table; writes predictions to `experiment_log`
+8. Returns the plan to `index.js` which uses it to drive the scrape/probe/query phases
+
+**Under USE_PLANNER:**
+- Pipeline scrapes only the config sources the planner selected (not the day-of-week schedule)
+- Pipeline probes `extra_urls` inline via `probeUrl()` (not probation rotation)
+- Pipeline runs `event_queries` the planner chose (not `getEventSearchQueries` rotation)
+- Probation rotation is DISABLED — all non-config sources must be explicit in the plan
+- Monitor receives `runPlan` and `planRowId` in its context at end of cycle
+
+**Floor rule (structural guarantee):** `applyFloorRule()` in `planner.js` auto-adds any config source not scraped in 7 days, regardless of what Opus proposed. Enforced in code, not just prompt guidance. Prevents scraper starvation and planner lobotomy.
+
+**When USE_PLANNER is unset (default):** Legacy day-of-week schedule-based path works unchanged. Probation rotation active. No planner or floor rule.
+
+### Experiment Log (Phase 2)
+Every planner prediction is logged as a falsifiable hypothesis in the `experiment_log` table. On the next run, `evaluateExpiredExperiments()` grades them against actual outcomes:
+- Count-based predictions: compared to `events_added` with 50% tolerance
+- Qualitative predictions ("new events"): any positive add counts as a hit
+- Ambiguous predictions: marked "inconclusive" (never guessed)
+
+The planner's prompt includes its own track record (hit rate, recent outcomes) so it can learn from its past decisions: "my Luma predictions hit 80% but my Meetup predictions hit 20%."
+
+### Dedup Reconciler (Phase 4)
+`utils/reconciler.js` — post-hoc sweep that finds duplicate rows already in the events table and proposes merges. Run manually:
+```bash
+cd agent && node src/utils/reconciler.js              # dry-run, print proposals
+cd agent && node src/utils/reconciler.js --execute    # actually soft-delete losers
+cd agent && node src/utils/reconciler.js --days 60    # custom window
+```
+Groups candidates by heuristic (same day ± 24h, fuzzy title OR venue fingerprint overlap). Sends groups to Haiku for merge decisions. Only merges when Haiku returns `is_duplicate=true` with confidence >= 0.85 AND `canonical_row_id` is not "unknown". Losers are soft-deleted via `deleted_at` + `merged_into_id` on the events table. Never hard-deletes. Never guesses canonical.
+
+**Soft-delete on events:** `deleted_at TIMESTAMPTZ` and `merged_into_id UUID`. All live queries (frontend `fetchEventsServer`, agent `getExistingEvents`) filter `WHERE deleted_at IS NULL`.
+
+### External Watchdog (Phase 3)
+A separate repository (`austin-ai-events-watchdog`, at `github.com/Chance101/austin-ai-events-watchdog`) runs on its own 6-hour GitHub Actions cron. Fully isolated from this codebase — the main system cannot modify it.
+
+Two checks:
+1. **Liveness**: Reads the main Supabase events table, counts upcoming events in next 14 days, alerts if below threshold (default: 5)
+2. **Coverage ground truth**: Fetches `luma.com/austin` with its own Luma-parsing code (deliberately duplicated for isolation), filters to AI-related events, cross-references against our DB. Reports coverage percentage and gap event titles.
+
+Writes findings to `coverage_audits` table. On alert, creates a GitHub issue in the watchdog repo. The planner reads coverage data as part of its strategic context.
+
+**Non-negotiable guardrail:** At least one measurement of success lives outside the system's control. The watchdog is that measurement.
+
 ### Event Processing Pipeline
-1. **Scraping**: Each source returns `{ title, description, start_time, url, ... }`
-   - Sources are scraped on a **weekly schedule** (not daily) to reduce duplicate noise
+1. **Planning** (when `USE_PLANNER=1`): Planner runs at start of cycle, produces a `runPlan` that drives source/query selection. Floor rule auto-adds stale config sources.
+1b. **Scraping**: Each source returns `{ title, description, start_time, url, ... }`
+   - Under `USE_PLANNER`: planner-selected config sources + explicit extra URLs
+   - Under legacy path: sources scraped on a **weekly schedule** (not daily) to reduce duplicate noise
    - High-update sources (AITX, Austin AI, Capital Factory): 3x/week (Mon/Wed/Fri)
    - Low-update sources (AICamp, Meetup groups, UT Austin, Austin Forum): 1x/week (Thu)
    - Schedule configured via `scrapeDays` in `config.js` (0=Sun through 6=Sat)
-   - DB-discovered sources (trusted/probation) still scraped every run
+   - Under legacy path: DB-discovered sources (trusted/probation) still scraped every run
    - Per-source results with diagnostics logged to `agent_runs.source_results` (JSONB)
    - Diagnostics include: HTTP status, page size, parse strategy, candidate elements, content signals
    - Content verification (Haiku) confirms parser breakage for config sources with suspicious diagnostics
@@ -433,7 +535,8 @@ The outer loop is a Claude Code scheduled task that runs daily, 2 hours after th
 
 **Restricted (propose only, do not push):**
 - `agent/src/index.js` — core pipeline orchestration
-- `agent/src/utils/*.js` (except errors.js) — shared utilities
+- `agent/src/planner.js` — strategic planner (drives what the system does each run)
+- `agent/src/utils/*.js` (except errors.js, scrapers.js) — shared utilities
 - `agent/src/monitor.js` — system evaluation logic
 - `frontend/src/**` — frontend components and pages
 
@@ -561,7 +664,7 @@ The Observatory (`/observatory`) provides transparency through three layers:
 ### Agent
 - Native Node.js test runner: `npm run test` (from agent/)
 - Pattern: `src/**/*.test.js`
-- ~90 tests covering: filters (Austin location, malformed titles), dedup (fuzzy matching), config validation, websearch URL matching
+- ~131 tests covering: filters (Austin location, malformed titles), dedup (fuzzy matching), config validation, websearch URL matching, parser router (domain-based scraper dispatch)
 - All tests are pure unit tests with no external dependencies (no API keys or DB needed)
 
 ### Frontend
@@ -574,7 +677,7 @@ The Observatory (`/observatory`) provides transparency through three layers:
 - Trigger: Every day at 6 AM UTC (midnight CST)
 - Runs: Single instance (concurrency lock prevents parallel runs)
 - Timeout: 30 minutes
-- Secrets required: `ANTHROPIC_API_KEY`, `SERPAPI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
+- Env: `USE_PLANNER=1` (planner-driven since 2026-04-16), `ANTHROPIC_API_KEY`, `SERPAPI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
 - On failure: Creates GitHub issue with error details
 - Manual run: Available from Actions tab with `skip_web_search` option
 
@@ -586,10 +689,11 @@ The Observatory (`/observatory`) provides transparency through three layers:
 ## Known Limitations & TODOs
 
 See `TODO.md` for detailed improvement list:
-- **Timezone audit**: Several scrapers may store times in wrong timezone
+- **Timezone audit**: Several scrapers may store times in wrong timezone. AICamp fixed (2026-04-15). Remaining: `luma.js`, `meetup.js`, `websearch.js`, `generic.js`, `austinai.js`, `austinforum.js`
 - **Missing end times**: Some sources don't provide duration
 - **Missing locations**: Some events lack venue data
 - **Observatory SEO**: Page uses client-side rendering (not crawlable)
+- **Additions pending**: Reflection loop (biweekly meta-learning), inner-loop agentic execution (bounded re-planning within cycle), discovery scout (separate weekly agent), autonomy infrastructure (benchmark suite + staged rollout)
 
 ## Accessing Related Resources
 
