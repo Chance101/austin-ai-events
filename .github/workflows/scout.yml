@@ -1,0 +1,38 @@
+name: Scout
+
+# Weekly source discovery agent. Finds new event listing pages the
+# system doesn't know about by cross-referencing aggregator pages.
+
+on:
+  schedule:
+    - cron: '0 14 * * 1'  # Mondays at 2 PM UTC (8 AM CDT)
+  workflow_dispatch:
+
+concurrency:
+  group: scout
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: agent/package-lock.json
+
+      - name: Install dependencies
+        working-directory: agent
+        run: npm ci
+
+      - name: Run scout
+        working-directory: agent
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node src/scout.js
