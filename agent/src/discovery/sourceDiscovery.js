@@ -651,6 +651,7 @@ function shouldSkipUrl(url) {
     'spotify.com',
     'instagram.com',
     'austinai.events',         // Our own site
+    'allevents.in',            // Unreliable aggregator: repackages Eventbrite/Meetup with wrong dates/times in JSON-LD
   ];
 
   const lowerUrl = url.toLowerCase();

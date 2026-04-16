@@ -139,6 +139,9 @@ export async function searchEvents(queries = [], runStats = null) {
         for (const result of results.organic_results) {
           const link = result.link;
           // Filter for event-like pages (individual events, not listing/index pages)
+          // Skip unreliable aggregators that repackage primary sources with bad metadata
+          if (link.includes('allevents.in')) continue;
+
           const isEventPage =
             link.includes('meetup.com/') ||
             link.includes('eventbrite.com/e/') ||
