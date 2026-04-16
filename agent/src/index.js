@@ -729,11 +729,19 @@ async function discoverEvents() {
 
       // Prepare event for database
       // Use AI-generated summary if available, otherwise fall back to original description
+      // Strip meaningless end_time: if end === start, the source didn't have
+      // a real end time and the scraper duplicated the start. Storing null
+      // is cleaner — the frontend shows "7:00 PM" not "7:00 PM - 7:00 PM".
+      let endTime = event.end_time || null;
+      if (endTime && event.start_time && new Date(endTime).getTime() === new Date(event.start_time).getTime()) {
+        endTime = null;
+      }
+
       const dbEvent = {
         title: event.title,
         description: classification.summary || event.description || null,
         start_time: event.start_time || null,
-        end_time: event.end_time || null,
+        end_time: endTime,
         location: event.address || null,
         venue_name: event.venue_name || null,
         address: event.address || null,
