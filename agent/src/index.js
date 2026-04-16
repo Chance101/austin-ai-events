@@ -750,7 +750,7 @@ async function discoverEvents() {
         source_event_id: event.source_event_id || null,
         audience_type: classification.audienceType,
         technical_level: classification.technicalLevel,
-        is_free: classification.isFree ?? event.is_free ?? null,
+        is_free: event.is_free ?? classification.isFree ?? null,
         price: event.price || null,
         organizer: event.organizer || null,
         image_url: event.image_url || null,
