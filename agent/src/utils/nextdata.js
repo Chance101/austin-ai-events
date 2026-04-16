@@ -50,6 +50,25 @@ export function extractEventsFromNextData($, { sourceId, sourceName, sourceUrl }
     return parseLumaEvents(lumaEvents, { sourceId, sourceName, sourceUrl });
   }
 
+  // Luma individual event pages: initialData.data.event (singular) +
+  // initialData.data.calendar (the presenting org) + initialData.data.hosts
+  // Structure: { data: { event: {...}, calendar: {name: "Hack AI"}, hosts: [...] } }
+  const lumaData = pageProps?.initialData?.data;
+  if (lumaData?.event && lumaData.event.start_at) {
+    const calendarName = lumaData.calendar?.name || null;
+    const entry = {
+      event: lumaData.event,
+      hosts: lumaData.hosts || [],
+      calendar: lumaData.calendar || null,
+      ticket_info: lumaData.ticket_info || null,
+    };
+    return parseLumaEvents([entry], {
+      sourceId,
+      sourceName: calendarName || sourceName,
+      sourceUrl,
+    });
+  }
+
   // Meetup Apollo state: pageProps.__APOLLO_STATE__
   const apolloState = pageProps?.__APOLLO_STATE__;
   if (apolloState) {
@@ -90,8 +109,13 @@ function parseLumaEvents(entries, { sourceId, sourceName, sourceUrl }) {
     const geo = evt.geo_address_info;
     const eventUrl = evt.url ? `https://lu.ma/${evt.url}` : null;
 
+    // Prefer the calendar/presenter name (the organization, e.g., "Hack AI")
+    // over hosts[0] (individual people, e.g., "Reid McCrabb"). On Luma,
+    // "Presented by" is the org; "Hosted By" lists individual co-hosts.
     let organizer = sourceName || null;
-    if (entry.hosts && entry.hosts.length > 0) {
+    if (entry.calendar?.name) {
+      organizer = entry.calendar.name;
+    } else if (entry.hosts && entry.hosts.length > 0) {
       organizer = entry.hosts[0].name || organizer;
     }
 
