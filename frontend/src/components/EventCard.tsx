@@ -123,8 +123,11 @@ export default function EventCard({ event, onClick }: EventCardProps) {
             )}
 
             {event.organizer && (
-              <div className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                by {event.organizer}
+              <div className="mt-1 text-sm text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+                {event.source === 'ut-austin' && (
+                  <span className="inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] leading-none" style={{ backgroundColor: '#BF5700' }}>🤘</span>
+                )}
+                <span>by {event.organizer}</span>
               </div>
             )}
           </div>
