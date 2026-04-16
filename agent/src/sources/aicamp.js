@@ -228,7 +228,21 @@ export async function scrapeAICamp(sourceConfig) {
 }
 
 /**
- * Fetch and parse an individual AICamp event detail page
+ * Fetch and parse an individual AICamp event detail page.
+ *
+ * AICamp detail pages do NOT publish JSON-LD and use <h4> (not <h1>/<h2>)
+ * for the event title. The prior implementation selected h1/h2 for title,
+ * returned null when that came back empty, and caused the caller to fall
+ * back to listing-only data — dropping venue, description, end_time, and
+ * the correct start time on every AICamp event.
+ *
+ * Robust extraction ground truth observed on the live page:
+ *   - <meta property="og:title"> reliably has the full title
+ *   - Main content container: <div class="col-lg-8 left-contents">
+ *   - Description paragraphs: first substantive <p> tags inside the container,
+ *     skipping metadata sections (Venue, Speaker, Agenda, Prerequisite, etc.)
+ *   - Venue block: <p><b>Venue:</b><br>Capital Factory, 701 Brazos St, ...</p>
+ *   - Google Calendar link embeds precise UTC times in dates=YYYYMMDDTHHMMSSZ format
  */
 async function fetchEventDetail(url, sourceConfig) {
   try {
@@ -243,7 +257,7 @@ async function fetchEventDetail(url, sourceConfig) {
     const html = await response.text();
     const $ = cheerio.load(html);
 
-    // Try JSON-LD first
+    // Try JSON-LD first (covers AICamp pages that happen to have it)
     let event = null;
     $('script[type="application/ld+json"]').each((_, script) => {
       try {
@@ -275,28 +289,49 @@ async function fetchEventDetail(url, sourceConfig) {
 
     if (event) return event;
 
-    // Fallback: parse from page content
-    const title = $('h1, h2').first().text().trim();
-    const description = $('meta[name="description"]').attr('content') ||
-                       $('[class*="description"], [class*="detail"]').first().text().trim().substring(0, 500);
+    // Title: og:title → h4 in .left-contents → any h4 → h1/h2 fallback
+    const title = $('meta[property="og:title"]').attr('content')?.trim()
+      || $('.left-contents h4').first().text().trim()
+      || $('h4').first().text().trim()
+      || $('h1, h2').first().text().trim();
 
-    // Look for date+time in the detail page
-    // Format: "May 06, 05:30 PM CDT" near the clock icon
-    const pageText = $('body').text();
+    // Description: gather the first few substantive paragraphs inside the main
+    // content container, skipping metadata sections. We use the .left-contents
+    // container when present to avoid grabbing unrelated page content.
+    let description = null;
+    const container = $('.left-contents').first();
+    const paraSource = container.length > 0 ? container.find('p') : $('p');
+    const metadataPrefixes = /^(Venue|Speaker|Agenda|Prerequisite|Who should attend|Local and Global|Twitter|RSVP)/i;
+    const descParas = [];
+    paraSource.each((_, el) => {
+      const text = $(el).text().trim();
+      if (text.length < 30) return;
+      if (metadataPrefixes.test(text)) return;
+      descParas.push(text);
+    });
+    if (descParas.length > 0) {
+      description = descParas.slice(0, 3).join('\n\n').substring(0, 1500);
+    } else {
+      // Last-resort fallback: og:description IF it's event-specific, not
+      // the site-wide generic (AICamp's site-wide description starts with
+      // "Join over half million developers...").
+      const ogDesc = $('meta[property="og:description"]').attr('content');
+      if (ogDesc && !/half million developers/i.test(ogDesc)) {
+        description = ogDesc;
+      }
+    }
 
+    // Start/end times: prefer the Google Calendar link's precise UTC values.
     let startTime = null;
     let endTime = null;
-
-    // Try to extract from Google Calendar link which has precise UTC times
-    // Pattern: dates=20260506T223000Z/20260507T013000Z
     const calMatch = html.match(/dates=(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z\/(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z/);
     if (calMatch) {
       startTime = `${calMatch[1]}-${calMatch[2]}-${calMatch[3]}T${calMatch[4]}:${calMatch[5]}:${calMatch[6]}Z`;
       endTime = `${calMatch[7]}-${calMatch[8]}-${calMatch[9]}T${calMatch[10]}:${calMatch[11]}:${calMatch[12]}Z`;
     }
-
     if (!startTime) {
-      // Fallback: parse text date, interpreting as Austin local time
+      // Parse "May 06, 05:30 PM CDT" text format as Austin local time
+      const pageText = $('body').text();
       const dateMatch = pageText.match(/(\w{3,9})\s+(\d{1,2}),?\s+(\d{1,2}:\d{2}\s*[AP]M)\s*(\w{3,4})/i);
       if (dateMatch) {
         const year = new Date().getFullYear();
@@ -304,9 +339,34 @@ async function fetchEventDetail(url, sourceConfig) {
       }
     }
 
-    // Look for venue/location text
-    const venueMatch = pageText.match(/(?:venue|location|address)[:\s]+([^,\n]+(?:,\s*[^,\n]+){0,3})/i);
-    const venue = venueMatch ? venueMatch[1].trim() : null;
+    // Venue + address: target the explicit "Venue:" paragraph.
+    // Structure: <p><b>Venue:</b><br>Capital Factory, 701 Brazos St, Austin, TX 78701<br>Room name:...</p>
+    // cheerio .text() collapses this to: "Venue:\nCapital Factory, 701 Brazos St, Austin, TX 78701\nRoom name:..."
+    let venueName = null;
+    let address = null;
+    paraSource.each((_, el) => {
+      if (venueName) return;
+      const text = $(el).text().trim();
+      if (!/^Venue:/i.test(text)) return;
+      const withoutHeader = text.replace(/^Venue:\s*/i, '');
+      const lines = withoutHeader.split('\n').map(l => l.trim()).filter(Boolean);
+      const addressLine = lines[0];
+      if (!addressLine) return;
+      const parts = addressLine.split(',').map(s => s.trim());
+      venueName = parts[0] || null;
+      address = parts.length > 1 ? parts.slice(1).join(', ') : null;
+    });
+
+    // Fallback to body-text regex if the explicit Venue block wasn't found.
+    if (!venueName) {
+      const pageText = $('body').text();
+      const venueMatch = pageText.match(/(?:venue|location|address)[:\s]+([^,\n]+(?:,\s*[^,\n]+){0,3})/i);
+      if (venueMatch) {
+        const parts = venueMatch[1].trim().split(',').map(s => s.trim());
+        venueName = parts[0] || null;
+        address = parts.length > 1 ? parts.slice(1).join(', ') : null;
+      }
+    }
 
     if (title) {
       return {
@@ -316,8 +376,8 @@ async function fetchEventDetail(url, sourceConfig) {
         source: sourceConfig.id,
         start_time: startTime,
         end_time: endTime,
-        venue_name: venue,
-        address: 'Austin, TX',
+        venue_name: venueName,
+        address: address || 'Austin, TX',
         is_free: true,
         organizer: 'AICamp',
         image_url: $('meta[property="og:image"]').attr('content') || null,
