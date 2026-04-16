@@ -23,6 +23,7 @@ import { checkAustinLocation, isMalformedTitle } from './utils/filters.js';
 import { ScrapeResult } from './utils/scrapeResult.js';
 import { classifyScrapeError, classifySilentFailure } from './utils/errors.js';
 import { routeToParser } from './utils/parserRouter.js';
+import { createMidCycleObserver } from './utils/midCycleObserver.js';
 
 /**
  * Create initial run stats object for tracking throughout the pipeline
@@ -271,6 +272,14 @@ async function discoverEvents() {
     console.log(`  Probation rotation: disabled under USE_PLANNER (use runPlan.extra_urls instead)\n`);
   }
 
+  // Create the mid-cycle observer for planner-driven runs.
+  // It watches scrape results and makes bounded adjustments.
+  const observer = (usePlanner && runPlan)
+    ? createMidCycleObserver(runPlan, {
+        onAdjustment: (adj) => console.log(`   🔄 Inner-loop adjustment: ${adj.type} — ${adj.added_url || adj.source}`),
+      })
+    : null;
+
   console.log('📡 Scraping sources...');
 
   // Helper: run the right scraper for a source.
@@ -440,6 +449,11 @@ async function discoverEvents() {
       allDiscoveredEvents.push(...events);
       runStats.sourcesScraped++;
 
+      // Inner-loop: observer tracks results for mid-cycle adjustments
+      if (observer) {
+        observer.observe(source, { events, status: scrapeStatus });
+      }
+
       // Update source stats in DB (pass diagnostics for intelligent demotion decisions)
       if (source.fromDb || source.url) {
         await updateSourceStats(source.url, events.length, scrapeStatus, scrapeDiagnostics).catch(() => {});
@@ -455,10 +469,39 @@ async function discoverEvents() {
         message: classified.message,
         retryable: classified.retryable,
       });
+
+      // Inner-loop: observer tracks errors too
+      if (observer) {
+        observer.observe(source, { events: [], status: 'error' }, error);
+      }
     }
   }
 
-  // 2a. Planner-requested extra URLs: inline probe any URLs the planner
+  // 2a. Inner-loop adjustments: after the scrape loop completes, the
+  // observer checks for triggers (parser errors, zero-from-expected,
+  // high-yield) and generates bounded adjustments — extra URLs to probe
+  // based on what happened during scraping. Max 5 adjustments per cycle.
+  if (observer && observer.hasAdjustments()) {
+    const adjustments = await observer.generateAdjustments();
+    if (adjustments.length > 0) {
+      console.log(`\n🔄 Inner-loop: ${adjustments.length} adjustment(s) from ${observer.triggerCount} trigger(s)`);
+      for (const adj of adjustments) {
+        try {
+          const probe = await probeUrl(adj.url, adj.parser_hint || 'scrape', { name: adj.url });
+          if (probe.events && probe.events.length > 0) {
+            allDiscoveredEvents.push(...probe.events);
+            console.log(`   🔄 ${adj.url} (${probe.scraperType}): ${probe.events.length} event(s) — ${adj.reason}`);
+          } else {
+            console.log(`   ⚪ ${adj.url}: 0 events — ${probe.error || probe.status}`);
+          }
+        } catch (error) {
+          console.error(`   ⚠️  Adjustment probe failed: ${error.message}`);
+        }
+      }
+    }
+  }
+
+  // 2b. Planner-requested extra URLs: inline probe any URLs the planner
   // added to runPlan.extra_urls. Under USE_PLANNER, this is the only way
   // DB-discovered or otherwise-specified URLs get scraped (probation
   // rotation is off). The probe uses the correct parser via routeToParser.
@@ -779,6 +822,7 @@ async function discoverEvents() {
           duplicates_skipped: runStats.duplicatesSkipped,
           inline_probe_events: runStats.inlineProbeEvents || 0,
           errors: runStats.errors,
+          inner_loop: observer ? observer.getSummary() : null,
         },
         plannerCostTracker,
       );
