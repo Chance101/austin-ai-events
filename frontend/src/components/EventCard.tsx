@@ -63,8 +63,13 @@ function getLocation(event: Event): string | null {
 
 export default function EventCard({ event, onClick }: EventCardProps) {
   const startDate = new Date(event.start_time);
+  const endDate = event.end_time ? new Date(event.end_time) : null;
   const location = getLocation(event);
   const description = cleanDescription(event.description);
+
+  const startDay = formatInTimeZone(startDate, AUSTIN_TIMEZONE, 'yyyy-MM-dd');
+  const endDay = endDate ? formatInTimeZone(endDate, AUSTIN_TIMEZONE, 'yyyy-MM-dd') : null;
+  const isMultiDay = endDay !== null && endDay !== startDay;
 
   return (
     <button
@@ -77,8 +82,9 @@ export default function EventCard({ event, onClick }: EventCardProps) {
             <div className="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase">
               {formatInTimeZone(startDate, AUSTIN_TIMEZONE, 'MMM')}
             </div>
-            <div className="text-2xl font-bold text-gray-900 dark:text-white">
+            <div className={`font-bold text-gray-900 dark:text-white ${isMultiDay ? 'text-xl' : 'text-2xl'}`}>
               {formatInTimeZone(startDate, AUSTIN_TIMEZONE, 'd')}
+              {isMultiDay && `-${formatInTimeZone(endDate!, AUSTIN_TIMEZONE, 'd')}`}
             </div>
             <div className="text-xs text-gray-500 dark:text-gray-400">
               {formatInTimeZone(startDate, AUSTIN_TIMEZONE, 'EEE')}
@@ -92,7 +98,10 @@ export default function EventCard({ event, onClick }: EventCardProps) {
 
             <div className="mt-1 text-sm text-gray-600 dark:text-gray-300">
               {formatInTimeZone(startDate, AUSTIN_TIMEZONE, 'h:mm a')}
-              {event.end_time && ` - ${formatInTimeZone(new Date(event.end_time), AUSTIN_TIMEZONE, 'h:mm a')}`}
+              {isMultiDay
+                ? ` — ${formatInTimeZone(endDate!, AUSTIN_TIMEZONE, 'MMM d')}`
+                : event.end_time && ` - ${formatInTimeZone(endDate!, AUSTIN_TIMEZONE, 'h:mm a')}`
+              }
             </div>
 
             {location && (
