@@ -733,8 +733,13 @@ async function discoverEvents() {
       // a real end time and the scraper duplicated the start. Storing null
       // is cleaner — the frontend shows "7:00 PM" not "7:00 PM - 7:00 PM".
       let endTime = event.end_time || null;
-      if (endTime && event.start_time && new Date(endTime).getTime() === new Date(event.start_time).getTime()) {
-        endTime = null;
+      if (endTime && event.start_time) {
+        const endMs = new Date(endTime).getTime();
+        const startMs = new Date(event.start_time).getTime();
+        // Strip meaningless end_time: same as start, or before start (impossible)
+        if (endMs === startMs || endMs < startMs) {
+          endTime = null;
+        }
       }
 
       const dbEvent = {
