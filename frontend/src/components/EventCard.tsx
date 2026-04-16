@@ -91,8 +91,8 @@ export default function EventCard({ event, onClick }: EventCardProps) {
               </div>
             </div>
             {isMultiDay && (
-              <div className="text-center bg-amber-100 dark:bg-amber-900 rounded-b-lg px-2 py-1 -mt-1">
-                <span className="text-xs font-medium text-amber-800 dark:text-amber-200 uppercase">Multi</span>
+              <div className="text-center bg-amber-100 dark:bg-amber-900 rounded-b-lg px-2 py-0.5 -mt-1">
+                <span className="text-xs font-medium text-amber-800 dark:text-amber-200">multi</span>
               </div>
             )}
           </div>
