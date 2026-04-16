@@ -37,6 +37,7 @@ import {
   getRecentOutcomes,
   getConfidenceSummary,
 } from './utils/experimentLog.js';
+import { getLatestReflection } from './reflection.js';
 
 const DAYS_IN_MS = 24 * 60 * 60 * 1000;
 const FLOOR_WINDOW_DAYS = 7;
@@ -172,7 +173,7 @@ function applyFloorRule(plan, floorDueSources, allConfigSources) {
  * Kept compact relative to the monitor's grading prompt — focused on
  * one decision: what should this run do.
  */
-function buildPlannerPrompt(metrics, budgetRemaining, allConfigSources, trackRecord) {
+function buildPlannerPrompt(metrics, budgetRemaining, allConfigSources, trackRecord, latestReflection) {
   const today = new Date().toISOString().split('T')[0];
 
   // Compact metric view focused on planning needs
@@ -216,12 +217,29 @@ Use this track record. Do NOT repeat actions that failed predictably.
 `;
   }
 
+  // Reflection section — accumulated strategic wisdom from biweekly meta-learning pass.
+  let reflectionSection = '';
+  if (latestReflection) {
+    reflectionSection = `
+## Strategic Reflection (from ${latestReflection.created_at})
+${latestReflection.strategy_updates || latestReflection.summary}
+
+Key patterns:
+${(latestReflection.patterns || []).slice(0, 5).map(p => `- [${p.category}] ${p.observation} (confidence: ${p.confidence})`).join('\n')}
+
+Recommendations:
+${(latestReflection.recommendations || []).slice(0, 5).map(r => `- [${r.priority}] ${r.action}`).join('\n')}
+
+This reflection was produced by a prior Opus analysis of ${LOOKBACK_DAYS}+ days of run data. Follow its strategy updates unless your current data contradicts them.
+`;
+  }
+
   return `You are the strategic PLANNER for an autonomous AI events curation system (austinai.events).
 You run at the START of each cycle on Opus because this decision point drives
 everything the system does next.
 
 ${ARCHITECTURAL_CONTEXT}
-
+${reflectionSection}
 ## Your Task
 
 Produce a runPlan — structured JSON that tells the pipeline what to scrape,
@@ -334,6 +352,15 @@ export async function runPlanner() {
     console.log(`   📊 Track record: ${trackRecord.summary.evaluated_count} evaluated, ${Math.round((trackRecord.summary.hit_rate || 0) * 100)}% hit rate`);
   }
 
+  // 3.7. Load the latest reflection (meta-learning context from the
+  // biweekly reflection pass). This is the accumulated strategic
+  // wisdom across many runs — patterns, recommendations, and
+  // strategy updates that the planner should follow.
+  const latestReflection = await getLatestReflection();
+  if (latestReflection) {
+    console.log(`   🪞 Latest reflection (${latestReflection.created_at}): ${latestReflection.summary?.substring(0, 100)}`);
+  }
+
   // 4. Compute floor-rule-due sources (structural guarantee)
   const floorDueSources = await computeFloorSources();
   if (floorDueSources.length > 0) {
@@ -342,7 +369,7 @@ export async function runPlanner() {
 
   // 5. Ask Opus for a plan
   const anthropic = getClient();
-  const prompt = buildPlannerPrompt(metrics, costTracker.remainingBudget, config.sources, trackRecord);
+  const prompt = buildPlannerPrompt(metrics, costTracker.remainingBudget, config.sources, trackRecord, latestReflection);
 
   let plan = null;
   try {

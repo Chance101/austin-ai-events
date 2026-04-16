@@ -1,0 +1,39 @@
+name: Reflection
+
+# Runs biweekly (1st and 15th of each month) to synthesize patterns
+# from the experiment log and run history into strategic guidance
+# that the planner reads on every subsequent run.
+
+on:
+  schedule:
+    - cron: '0 12 1,15 * *'  # Noon UTC on 1st and 15th
+  workflow_dispatch:  # Manual trigger
+
+concurrency:
+  group: reflection
+  cancel-in-progress: false
+
+jobs:
+  reflect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: agent/package-lock.json
+
+      - name: Install dependencies
+        working-directory: agent
+        run: npm ci
+
+      - name: Run reflection
+        working-directory: agent
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node src/reflection.js
