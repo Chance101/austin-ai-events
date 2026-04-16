@@ -329,15 +329,11 @@ async function fetchEventDetail(url, sourceConfig) {
       startTime = `${calMatch[1]}-${calMatch[2]}-${calMatch[3]}T${calMatch[4]}:${calMatch[5]}:${calMatch[6]}Z`;
       endTime = `${calMatch[7]}-${calMatch[8]}-${calMatch[9]}T${calMatch[10]}:${calMatch[11]}:${calMatch[12]}Z`;
     }
-    if (!startTime) {
-      // Parse "May 06, 05:30 PM CDT" text format as Austin local time
-      const pageText = $('body').text();
-      const dateMatch = pageText.match(/(\w{3,9})\s+(\d{1,2}),?\s+(\d{1,2}:\d{2}\s*[AP]M)\s*(\w{3,4})/i);
-      if (dateMatch) {
-        const year = new Date().getFullYear();
-        startTime = parseAustinDate(dateMatch[1], dateMatch[2], year, dateMatch[3].trim());
-      }
-    }
+    // If no Google Calendar link, do NOT text-parse with currentYear as
+    // the assumed year — that falsely promotes old events (e.g., 2023) to
+    // the current year. Return start_time=null and let the caller's merge
+    // use card.startTime, which correctly derives the year from the event
+    // ID (W2023041915 → year 2023).
 
     // Venue + address: target the explicit "Venue:" paragraph.
     // Structure: <p><b>Venue:</b><br>Capital Factory, 701 Brazos St, Austin, TX 78701<br>Room name:...</p>
