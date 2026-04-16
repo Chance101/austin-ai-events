@@ -203,10 +203,16 @@ function parseJsonLdEvent(event, sourceConfig) {
     isFree = event.isAccessibleForFree;
   }
 
+  // Prefer sourceConfig.name (the calendar/org name, e.g., "AITX") over
+  // event.organizer (which Luma populates with individual host names
+  // mislabeled as @type:Organization). Only use event.organizer if
+  // sourceConfig.name is generic or absent.
   let organizer = sourceConfig.name;
-  if (event.organizer) {
-    const org = Array.isArray(event.organizer) ? event.organizer[0] : event.organizer;
-    organizer = org?.name || sourceConfig.name;
+  if (!organizer || organizer === 'web-search' || organizer === 'test') {
+    if (event.organizer) {
+      const org = Array.isArray(event.organizer) ? event.organizer[0] : event.organizer;
+      organizer = org?.name || organizer;
+    }
   }
 
   const imageUrl = Array.isArray(event.image) ? event.image[0] : event.image;
