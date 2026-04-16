@@ -48,6 +48,7 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SKIP_WEB_SEARCH: ${{ inputs.skip_web_search }}
+          USE_PLANNER: '1'
         run: npm run discover
 
       - name: Summary
