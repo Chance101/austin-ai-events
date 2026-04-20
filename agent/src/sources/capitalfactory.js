@@ -177,13 +177,20 @@ async function scrapeCFEventsPage(sourceConfig) {
         endTime = fromZonedTime(endDateStr, AUSTIN_TIMEZONE).toISOString();
       }
 
-      // Try to find a matching link on the page
+      // Find the best matching link for this event title
       let eventUrl = sourceConfig.url;
       const titleLower = title.toLowerCase();
+      let bestScore = 0;
       $('a').each((_, el) => {
-        const linkText = $(el).text().toLowerCase();
+        const linkText = ($(el).text() || '').trim().toLowerCase();
         const href = $(el).attr('href');
-        if (href && linkText && titleLower.includes(linkText.trim().toLowerCase().substring(0, 10))) {
+        if (!href || linkText.length < 4) return;
+        const words = linkText.split(/\s+/).filter(w => w.length >= 3);
+        if (words.length === 0) return;
+        const matchCount = words.filter(w => titleLower.includes(w)).length;
+        const score = matchCount / words.length;
+        if (score > bestScore && matchCount >= 1) {
+          bestScore = score;
           eventUrl = href.startsWith('http') ? href : `https://info.capitalfactory.com${href}`;
         }
       });
