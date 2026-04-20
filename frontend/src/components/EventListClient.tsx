@@ -42,6 +42,7 @@ export default function EventListClient({ initialEvents }: EventListClientProps)
       const { data, error: queryError } = await supabase
         .from('events')
         .select('*')
+        .is('deleted_at', null)
         .gte('start_time', now.toISOString())
         .order('start_time', { ascending: true });
 
