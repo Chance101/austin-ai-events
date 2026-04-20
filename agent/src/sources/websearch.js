@@ -164,6 +164,9 @@ export async function searchEvents(queries = [], runStats = null) {
       // Process events from Google Events (if available)
       if (results.events_results) {
         for (const event of results.events_results) {
+          // Aggregator — prefer primary sources
+          if (event.link?.includes('allevents.in')) continue;
+
           urlsToFetch.push({
             url: event.link,
             fallback: {
