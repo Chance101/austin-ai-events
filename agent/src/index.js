@@ -762,11 +762,29 @@ async function discoverEvents() {
         is_verified: validation.confidence > 0.8,
       };
 
-      // Upsert to database
+      // Upsert to database. Postgres turns this into INSERT or UPDATE
+      // depending on whether the (source, source_event_id) constraint matches,
+      // and the JS client doesn't tell us which. Compare the row's created_at
+      // against this run's start time (with a 5s buffer for clock drift) so
+      // an upsert that touched a pre-existing row is counted as an update,
+      // not a new insert.
       const result = await upsertEvent(dbEvent);
-      console.log(`    ✅ Added: ${result.title}`);
-      runStats.eventsAdded++;
-      decisionLog.log({ event: event.title, source: event.source, stage: 'upsert', outcome: 'accepted', details: { claudeCalled: true } });
+      const createdAtMs = result.created_at ? new Date(result.created_at).getTime() : null;
+      const isFreshInsert = createdAtMs === null || createdAtMs >= runStats.startTime - 5000;
+      if (isFreshInsert) {
+        console.log(`    ✅ Added: ${result.title}`);
+        runStats.eventsAdded++;
+      } else {
+        console.log(`    🔄 Refreshed: ${result.title}`);
+        runStats.eventsUpdated++;
+      }
+      decisionLog.log({
+        event: event.title,
+        source: event.source,
+        stage: 'upsert',
+        outcome: 'accepted',
+        details: { claudeCalled: true, persisted: isFreshInsert ? 'inserted' : 'updated' },
+      });
 
       // Add to existing events for dedup checking
       existingEvents.push(result);
