@@ -280,3 +280,15 @@ export function getEventHash(event) {
 
   return normalizedUrl;
 }
+
+/**
+ * Stable dedup key from (source, source_event_id) — mirrors the DB unique
+ * constraint. Catches duplicates when URL drifts between scrapes (e.g., a
+ * scraper change picks a different external link for the same event) but
+ * the source-assigned ID is unchanged. Returns null when source_event_id
+ * is missing — those rows fall through to URL/title-based dedup.
+ */
+export function getEventIdKey(event) {
+  if (!event.source || !event.source_event_id) return null;
+  return `${event.source}|${event.source_event_id}`;
+}

@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { getEventHash, getVenueFingerprints, venuesOverlap } from './dedup.js';
+import { getEventHash, getEventIdKey, getVenueFingerprints, venuesOverlap } from './dedup.js';
 
 // Note: findDuplicates imports checkDuplicate from claude.js which requires
 // the Anthropic API. We test getEventHash directly (no external deps) and
@@ -12,6 +12,58 @@ import { getEventHash, getVenueFingerprints, venuesOverlap } from './dedup.js';
 // To test these paths we use dynamic import with the experimental module mock flag.
 // Since we can't guarantee that flag is set, we test the Claude-free function
 // (getEventHash) thoroughly and use a conditional approach for findDuplicates.
+
+describe('getEventIdKey', () => {
+  it('builds a key from source + source_event_id', () => {
+    const event = { source: 'capital-factory', source_event_id: 'cf-5-14-health-supernova' };
+    assert.strictEqual(getEventIdKey(event), 'capital-factory|cf-5-14-health-supernova');
+  });
+
+  it('returns null when source_event_id is missing', () => {
+    const event = { source: 'web-search', source_event_id: null };
+    assert.strictEqual(getEventIdKey(event), null);
+  });
+
+  it('returns null when source_event_id is undefined', () => {
+    const event = { source: 'web-search' };
+    assert.strictEqual(getEventIdKey(event), null);
+  });
+
+  it('returns null when source_event_id is empty string', () => {
+    const event = { source: 'web-search', source_event_id: '' };
+    assert.strictEqual(getEventIdKey(event), null);
+  });
+
+  it('returns null when source is missing', () => {
+    const event = { source_event_id: 'abc123' };
+    assert.strictEqual(getEventIdKey(event), null);
+  });
+
+  it('namespaces by source — same id from different sources produces different keys', () => {
+    const a = { source: 'aitx', source_event_id: 'meetup-jan-26' };
+    const b = { source: 'austin-ai', source_event_id: 'meetup-jan-26' };
+    assert.notStrictEqual(getEventIdKey(a), getEventIdKey(b));
+  });
+
+  it('regression: catches the Capital Factory URL-drift case from 2026-04-25', () => {
+    // Same event, different URLs picked across scrapes (the outer-loop's
+    // 5bd2d8e Capital Factory URL fix changed which link the scraper picks)
+    const oldRow = {
+      source: 'capital-factory',
+      source_event_id: 'cf-5-14-health-supernova,-connect-at-t',
+      url: 'https://www.healthsupernova.com/',
+    };
+    const reScraped = {
+      source: 'capital-factory',
+      source_event_id: 'cf-5-14-health-supernova,-connect-at-t',
+      url: 'https://info.capitalfactory.com/health-supernova',
+    };
+    // URL hashes diverge — URL-hash dedup misses
+    assert.notStrictEqual(getEventHash(oldRow), getEventHash(reScraped));
+    // ID keys match — ID-key dedup catches it
+    assert.strictEqual(getEventIdKey(oldRow), getEventIdKey(reScraped));
+  });
+});
 
 describe('getEventHash', () => {
   it('produces consistent hash for the same URL', () => {

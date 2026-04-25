@@ -11,7 +11,7 @@ import { scrapeAICamp } from './sources/aicamp.js';
 import { scrapeCapitalFactory } from './sources/capitalfactory.js';
 import { scrapeUTAustin } from './sources/utaustin.js';
 import { validateEvent, classifyEvent, extractLocationFromImage, verifyPageHasEvents } from './utils/claude.js';
-import { findDuplicates, getEventHash } from './utils/dedup.js';
+import { findDuplicates, getEventHash, getEventIdKey } from './utils/dedup.js';
 import { upsertEvent, getExistingEvents, updateEventFields, logAgentRun, getSupabase, isReadOnlyMode } from './utils/supabase.js';
 import { discoverSources, getTrustedSources, getProbationSources, updateSourceStats, updateSourceValidationStats, getEventSearchQueries } from './discovery/sourceDiscovery.js';
 import { analyzeUnprocessedFeedback } from './feedback/analyzeFeedback.js';
@@ -552,6 +552,13 @@ async function discoverEvents() {
   console.log('\n🔄 Checking for duplicates...');
   const existingEvents = await getExistingEvents();
   const existingHashes = new Set(existingEvents.map(e => getEventHash(e)));
+  // Mirror the DB unique constraint at the application layer so URL drift
+  // between scrapes doesn't bypass dedup and waste a Claude classify call.
+  const existingByIdKey = new Map();
+  for (const e of existingEvents) {
+    const key = getEventIdKey(e);
+    if (key) existingByIdKey.set(key, e);
+  }
 
   // 4. Validate and process each event
   console.log('\n✅ Validating and classifying events...');
@@ -595,49 +602,57 @@ async function discoverEvents() {
         continue;
       }
 
-      // Quick dedupe check by URL hash — but detect changed events (date moved, venue changed)
+      // Quick dedupe — match on URL hash OR stable (source, source_event_id) key.
+      // ID-key catches the case where a scraper change shifts URL extraction
+      // for an event we already have, so URL hashes diverge but the source's
+      // own ID is unchanged.
       const hash = getEventHash(event);
-      if (existingHashes.has(hash)) {
-        const existing = existingEvents.find(e => getEventHash(e) === hash);
-        if (existing) {
-          const changes = {};
-          // Compare start_time (normalize to ISO date strings for comparison)
-          if (event.start_time && existing.start_time) {
-            const newStart = new Date(event.start_time).toISOString();
-            const oldStart = new Date(existing.start_time).toISOString();
-            if (newStart !== oldStart) changes.start_time = event.start_time;
-          }
-          if (event.end_time && existing.end_time) {
-            const newEnd = new Date(event.end_time).toISOString();
-            const oldEnd = new Date(existing.end_time).toISOString();
-            if (newEnd !== oldEnd) changes.end_time = event.end_time;
-          }
-          // Compare venue/address (only update if scraper provided new data)
-          if (event.venue_name && event.venue_name !== existing.venue_name) {
-            changes.venue_name = event.venue_name;
-          }
-          if (event.address && event.address !== existing.address) {
-            changes.address = event.address;
-            changes.location = event.address;
-          }
+      const idKey = getEventIdKey(event);
+      const matchByHash = existingHashes.has(hash)
+        ? existingEvents.find(e => getEventHash(e) === hash)
+        : null;
+      const matchById = idKey ? existingByIdKey.get(idKey) : null;
+      const existing = matchByHash || matchById || null;
+      const matchSignal = matchByHash && matchById ? 'url+id'
+                       : matchByHash ? 'url'
+                       : matchById ? 'source_event_id'
+                       : null;
 
-          if (Object.keys(changes).length > 0) {
-            const changeDesc = Object.keys(changes).join(', ');
-            console.log(`  🔄 Updating (${changeDesc}): ${event.title?.substring(0, 50)}...`);
-            try {
-              await updateEventFields(existing.id, changes);
-              runStats.eventsUpdated++;
-              decisionLog.log({ event: event.title, source: event.source, stage: 'dedup_hash', outcome: 'updated', reason: `Fields changed: ${changeDesc}` });
-            } catch (err) {
-              console.error(`    Failed to update: ${err.message}`);
-            }
-          } else {
-            runStats.duplicatesSkipped++;
-            decisionLog.log({ event: event.title, source: event.source, stage: 'dedup_hash', outcome: 'duplicate', reason: 'Exact hash match' });
+      if (existing) {
+        const changes = {};
+        // Compare start_time (normalize to ISO date strings for comparison)
+        if (event.start_time && existing.start_time) {
+          const newStart = new Date(event.start_time).toISOString();
+          const oldStart = new Date(existing.start_time).toISOString();
+          if (newStart !== oldStart) changes.start_time = event.start_time;
+        }
+        if (event.end_time && existing.end_time) {
+          const newEnd = new Date(event.end_time).toISOString();
+          const oldEnd = new Date(existing.end_time).toISOString();
+          if (newEnd !== oldEnd) changes.end_time = event.end_time;
+        }
+        // Compare venue/address (only update if scraper provided new data)
+        if (event.venue_name && event.venue_name !== existing.venue_name) {
+          changes.venue_name = event.venue_name;
+        }
+        if (event.address && event.address !== existing.address) {
+          changes.address = event.address;
+          changes.location = event.address;
+        }
+
+        if (Object.keys(changes).length > 0) {
+          const changeDesc = Object.keys(changes).join(', ');
+          console.log(`  🔄 Updating (${changeDesc}, dedup: ${matchSignal}): ${event.title?.substring(0, 50)}...`);
+          try {
+            await updateEventFields(existing.id, changes);
+            runStats.eventsUpdated++;
+            decisionLog.log({ event: event.title, source: event.source, stage: 'dedup_hash', outcome: 'updated', reason: `Fields changed via ${matchSignal}: ${changeDesc}` });
+          } catch (err) {
+            console.error(`    Failed to update: ${err.message}`);
           }
         } else {
           runStats.duplicatesSkipped++;
-          decisionLog.log({ event: event.title, source: event.source, stage: 'dedup_hash', outcome: 'duplicate', reason: 'Exact hash match' });
+          decisionLog.log({ event: event.title, source: event.source, stage: 'dedup_hash', outcome: 'duplicate', reason: `Match on ${matchSignal}` });
         }
         continue;
       }
@@ -789,6 +804,8 @@ async function discoverEvents() {
       // Add to existing events for dedup checking
       existingEvents.push(result);
       existingHashes.add(hash);
+      const newIdKey = getEventIdKey(result);
+      if (newIdKey) existingByIdKey.set(newIdKey, result);
 
       // Rate limiting
       await new Promise(resolve => setTimeout(resolve, 500));
