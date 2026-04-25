@@ -195,6 +195,42 @@ IMPORTANT: You MUST verify the location based on venue_name or address fields in
   return { isValid: false, confidence: 0, reason: 'Failed to parse response', concerns: [] };
 }
 
+// Valid enum values for the events table — mirror supabase/schema.sql.
+// Adding values requires a database migration; keep these arrays in sync.
+export const VALID_AUDIENCE_TYPES = ['developers', 'business', 'researchers', 'general', 'students'];
+export const VALID_TECHNICAL_LEVELS = ['beginner', 'intermediate', 'advanced', 'all-levels'];
+
+/**
+ * Filter Haiku's classification output against the database enums.
+ * Invalid values are dropped (logged so we can see drift); empty results
+ * fall back to safe defaults. Defense at the LLM-to-DB boundary so a
+ * single hallucinated enum value can't break the upsert.
+ */
+export function sanitizeClassification(parsed) {
+  const rawAudience = Array.isArray(parsed?.audienceType) ? parsed.audienceType : [];
+  const audience = rawAudience.filter(v => VALID_AUDIENCE_TYPES.includes(v));
+  const droppedAudience = rawAudience.filter(v => !VALID_AUDIENCE_TYPES.includes(v));
+  if (droppedAudience.length > 0) {
+    console.warn(`    ⚠️  Dropped invalid audience_type values: ${JSON.stringify(droppedAudience)}`);
+  }
+
+  let technicalLevel = parsed?.technicalLevel;
+  if (!VALID_TECHNICAL_LEVELS.includes(technicalLevel)) {
+    if (technicalLevel != null) {
+      console.warn(`    ⚠️  Dropped invalid technical_level value: ${JSON.stringify(technicalLevel)}`);
+    }
+    technicalLevel = 'all-levels';
+  }
+
+  return {
+    audienceType: audience.length > 0 ? audience : ['general'],
+    technicalLevel,
+    isFree: typeof parsed?.isFree === 'boolean' ? parsed.isFree : null,
+    summary: typeof parsed?.summary === 'string' ? parsed.summary : null,
+    reasoning: typeof parsed?.reasoning === 'string' ? parsed.reasoning : null,
+  };
+}
+
 /**
  * Use Claude to classify an event by audience and technical level
  * @param {Object} eventData - The event data to classify
@@ -212,8 +248,8 @@ Organizer: ${eventData.organizer || 'Unknown'}
 
 Respond with a JSON object:
 {
-  "audienceType": string[],     // array from: "developers", "business", "researchers", "general", "students"
-  "technicalLevel": string,     // one of: "beginner", "intermediate", "advanced", "all-levels"
+  "audienceType": string[],     // MUST contain only values from this exact list — do not invent categories: "developers", "business", "researchers", "general", "students". If none fit, use ["general"].
+  "technicalLevel": string,     // MUST be exactly one of: "beginner", "intermediate", "advanced", "all-levels"
   "isFree": boolean | null,     // true, false, or null if unknown
   "summary": string,            // 1-2 sentence clean summary of what the event is about (no URLs, no markdown, no registration info)
   "reasoning": string           // brief explanation of classification
@@ -244,7 +280,7 @@ Guidelines for summary:
   try {
     const jsonMatch = responseText.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
+      return sanitizeClassification(JSON.parse(jsonMatch[0]));
     }
   } catch (e) {
     console.error('Failed to parse Claude classification:', e);
